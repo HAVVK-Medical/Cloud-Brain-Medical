@@ -1,16 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
-  Activity,
-  ArrowDownUp,
-  BadgeCheck,
   BellRing,
-  CalendarDays,
   CirclePlus,
-  Copy,
   RefreshCw,
-  ShieldCheck,
-  Sparkles,
 } from 'lucide-vue-next';
 
 import {
@@ -53,8 +46,13 @@ import {
   listPromptTemplates,
   markNotificationRead,
 } from '@/api/workflow';
-import DashboardCharts from '@/components/DashboardCharts.vue';
 import { useAuthStore } from '@/stores/auth';
+import AdminAuditPanel from '@/views/admin/panels/AdminAuditPanel.vue';
+import AdminConfigPanel from '@/views/admin/panels/AdminConfigPanel.vue';
+import AdminEditorPanel from '@/views/admin/panels/AdminEditorPanel.vue';
+import AdminMasterPanel from '@/views/admin/panels/AdminMasterPanel.vue';
+import AdminOverviewPanel from '@/views/admin/panels/AdminOverviewPanel.vue';
+import AdminResourcesPanel from '@/views/admin/panels/AdminResourcesPanel.vue';
 import type {
   AiCallRecordSummary,
   AiConfigSummary,
@@ -224,6 +222,91 @@ const adminPanels = [
 ] as const;
 
 const activeAdminPanel = ref<(typeof adminPanels)[number]['id']>('overview');
+const adminPanelComponent = computed(() => {
+  switch (activeAdminPanel.value) {
+    case 'master':
+      return AdminMasterPanel;
+    case 'resources':
+      return AdminResourcesPanel;
+    case 'config':
+      return AdminConfigPanel;
+    case 'audit':
+      return AdminAuditPanel;
+    default:
+      return AdminOverviewPanel;
+  }
+});
+
+const adminWorkspace = reactive({
+  authStore,
+  loading,
+  saving,
+  error,
+  dashboard,
+  dashboardTrends,
+  aiUsage,
+  prescriptionReviewRate,
+  riskDistribution,
+  triageAccuracy,
+  departments,
+  doctors,
+  schedules,
+  drugs,
+  rules,
+  aiConfigs,
+  promptTemplates,
+  aiRecords,
+  auditLogs,
+  notifications,
+  departmentFilter,
+  doctorFilter,
+  drugKeyword,
+  currentKind,
+  currentId,
+  notificationLoading,
+  ackingNotificationId,
+  notificationSocketState,
+  departmentForm,
+  doctorForm,
+  scheduleForm,
+  drugForm,
+  ruleForm,
+  aiForm,
+  promptForm,
+  activeTone,
+  unreadNotificationCount,
+  selectedDepartment,
+  selectedDoctor,
+  visibleSchedules,
+  adminPanels,
+  activeAdminPanel,
+  formatDateTime,
+  formatStatus,
+  truncate,
+  riskTone,
+  loadDashboardBundle,
+  loadAll,
+  loadNotifications,
+  upsertNotification,
+  connectNotificationSocket,
+  closeNotificationSocket,
+  ackNotification,
+  syncCurrentSelection,
+  saveCurrent,
+  toggleCurrent,
+  createNew,
+  clearFilters,
+  selectDepartment,
+  selectDoctor,
+  selectSchedule,
+  selectDrug,
+  selectRule,
+  selectAi,
+  selectPrompt,
+  setActiveAdminPanel: (panel: (typeof adminPanels)[number]['id']) => {
+    activeAdminPanel.value = panel;
+  },
+});
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
@@ -717,11 +800,11 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="page">
-    <div class="band">
+    <div class="band workspace-shell">
       <div class="band-header">
         <div>
           <h2 class="band-title">管理工作台</h2>
-          <p class="band-copy">维护科室、医生、排班、药品、规则、AI 配置和提示词模板，先把底盘跑稳。</p>
+          <p class="band-copy">基础数据、排班、配置和审计分区展示，维护时更像后台，不再像大杂烩单页。</p>
         </div>
         <span class="status-chip" :data-tone="activeTone">
           <span class="chip-dot" />
@@ -729,7 +812,7 @@ onBeforeUnmount(() => {
         </span>
       </div>
 
-      <div class="toolbar">
+      <div class="toolbar workspace-topline">
         <span class="pill" :data-tone="notificationSocketState === 'connected' ? 'healthy' : 'loading'">
           <BellRing :size="14" />
           <span>WS {{ notificationSocketState }}</span>
@@ -753,14 +836,6 @@ onBeforeUnmount(() => {
         <button class="button-secondary" type="button" @click="createNew('drug')">
           <CirclePlus :size="16" />
           <span>新建药品</span>
-        </button>
-        <button class="button-secondary" type="button" @click="createNew('rule')">
-          <CirclePlus :size="16" />
-          <span>新建规则</span>
-        </button>
-        <button class="button-secondary" type="button" @click="createNew('ai')">
-          <CirclePlus :size="16" />
-          <span>新建 AI 配置</span>
         </button>
       </div>
 
@@ -793,7 +868,6 @@ onBeforeUnmount(() => {
             <span>应用筛选</span>
           </button>
           <button class="button-ghost" type="button" @click="clearFilters">
-            <ArrowDownUp :size="16" />
             <span>清空</span>
           </button>
         </div>
@@ -814,473 +888,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <section class="section workspace-overview" v-show="activeAdminPanel === 'overview'">
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">后台总览</h3>
-            <p class="section-copy">先看今日挂号、待接诊、AI 调用和高风险审方，再进入具体维护页。</p>
-          </div>
-          <button class="button-secondary" type="button" @click="activeAdminPanel = 'master'">
-            <CirclePlus :size="16" />
-            <span>维护资料</span>
-          </button>
-        </div>
-
-        <div class="detail-grid two">
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">今日挂号</div>
-              <span class="pill">{{ dashboard?.todayRegistrations ?? 0 }}</span>
-            </div>
-            <p class="mini-item-copy">今天的门诊挂号量，适合作为后台首页主指标。</p>
-          </div>
-
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">待接诊</div>
-              <span class="pill" data-tone="loading">{{ dashboard?.waitingRegistrations ?? 0 }}</span>
-            </div>
-            <p class="mini-item-copy">未进入接诊的挂号排队状态。</p>
-          </div>
-
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">AI 调用</div>
-              <span class="pill">{{ dashboard?.aiCallRecords ?? 0 }}</span>
-            </div>
-            <p class="mini-item-copy">分诊、病历和审方的 AI 相关调用总量。</p>
-          </div>
-
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">高风险审方</div>
-              <span class="pill" :data-tone="dashboard?.highRiskReviews ? 'danger' : 'healthy'">{{ dashboard?.highRiskReviews ?? 0 }}</span>
-            </div>
-            <p class="mini-item-copy">这里最适合优先盯住用药风险。</p>
-          </div>
-        </div>
-
-        <div class="action-row">
-          <button class="button-secondary" type="button" @click="activeAdminPanel = 'master'">基础资料</button>
-          <button class="button-secondary" type="button" @click="activeAdminPanel = 'resources'">排班 / 药品</button>
-          <button class="button-secondary" type="button" @click="activeAdminPanel = 'config'">规则 / 配置</button>
-          <button class="button-ghost" type="button" @click="activeAdminPanel = 'audit'">审计记录</button>
-        </div>
-      </section>
-
-      <div class="metric-grid" v-show="activeAdminPanel === 'overview'">
-        <article class="metric">
-          <div class="card-head"><h3>今日挂号</h3><ClipboardList :size="18" /></div>
-          <div class="metric-value">{{ dashboard?.todayRegistrations ?? 0 }}</div>
-          <p>系统今日挂号总量。</p>
-        </article>
-        <article class="metric">
-          <div class="card-head"><h3>待接诊</h3><Activity :size="18" /></div>
-          <div class="metric-value">{{ dashboard?.waitingRegistrations ?? 0 }}</div>
-          <p>尚未进入接诊的号源。</p>
-        </article>
-        <article class="metric">
-          <div class="card-head"><h3>AI 调用</h3><Sparkles :size="18" /></div>
-          <div class="metric-value">{{ dashboard?.aiCallRecords ?? 0 }}</div>
-          <p>本地规则模拟与审计记录。</p>
-        </article>
-        <article class="metric">
-          <div class="card-head"><h3>高风险审方</h3><ShieldCheck :size="18" /></div>
-          <div class="metric-value">{{ dashboard?.highRiskReviews ?? 0 }}</div>
-          <p>需要关注的风险处方数。</p>
-        </article>
-      </div>
-    </div>
-
-    <DashboardCharts
-      v-show="activeAdminPanel === 'overview'"
-      :overview="dashboard"
-      :trends="dashboardTrends"
-      :ai-usage="aiUsage"
-      :prescription-review-rate="prescriptionReviewRate"
-      :risk-distribution="riskDistribution"
-      :triage-accuracy="triageAccuracy"
-    />
-
-    <div
-      class="detail-grid workspace-grid"
-      :class="{ 'workspace-grid-single': activeAdminPanel === 'audit' }"
-      v-show="activeAdminPanel !== 'overview'"
-    >
-      <div class="stack" v-show="activeAdminPanel === 'master' || activeAdminPanel === 'resources' || activeAdminPanel === 'config'">
-        <section class="section" v-show="activeAdminPanel === 'master'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">基础数据</h3>
-              <p class="section-copy">先把页面上的资源维护起来，后面整个主链路才有稳定数据。</p>
-            </div>
-          </div>
-
-          <div class="detail-grid two">
-            <ul class="mini-list overflow-list">
-              <li v-for="department in departments" :key="department.id" class="mini-item" @click="selectDepartment(department)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ department.name }}</div>
-                  <span class="pill">{{ department.code }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ department.type || '未分类' }}</span>
-                  <span>{{ formatStatus(department.status) }}</span>
-                  <span>{{ department.doctorCount ?? 0 }} 医生</span>
-                </div>
-              </li>
-            </ul>
-
-            <ul class="mini-list overflow-list">
-              <li v-for="doctor in doctors" :key="doctor.id" class="mini-item" @click="selectDoctor(doctor)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ doctor.name }}</div>
-                  <span class="pill">{{ doctor.title || '门诊医生' }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ doctor.departmentName || '未分科' }}</span>
-                  <span>{{ formatStatus(doctor.status) }}</span>
-                  <span>{{ doctor.scheduleCount ?? 0 }} 排班</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeAdminPanel === 'master'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">风险告警</h3>
-              <p class="section-copy">全局未读处方风险提醒，WebSocket 接入前先通过补拉机制兜底。</p>
-            </div>
-            <button class="button-ghost" type="button" @click="loadNotifications" :disabled="notificationLoading">
-              <BellRing :size="16" :class="{ spinning: notificationLoading }" />
-              <span>{{ unreadNotificationCount }} 条</span>
-            </button>
-          </div>
-
-          <ul v-if="notifications.length" class="mini-list overflow-list">
-            <li v-for="notice in notifications" :key="notice.id" class="mini-item">
-              <div class="mini-item-head">
-                <div class="mini-item-title">{{ notice.patientSummary || notice.alertType }}</div>
-                <span class="pill" :data-tone="riskTone(notice.displayLevel)">{{ notice.displayLevel || notice.alertType }}</span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ notice.recipientRole }}</span>
-                <span>{{ notice.alertType }}</span>
-                <span>{{ formatDateTime(notice.createdAt) }}</span>
-              </div>
-              <p class="mini-item-copy">{{ truncate(notice.riskSummary, 120) }}</p>
-              <div class="action-row">
-                <button class="button-ghost" type="button" @click="ackNotification(notice.id)" :disabled="ackingNotificationId === notice.id">
-                  <BadgeCheck :size="16" />
-                  <span>{{ ackingNotificationId === notice.id ? '标记中' : '标记已读' }}</span>
-                </button>
-              </div>
-            </li>
-          </ul>
-          <div v-else class="mini-item">
-            <div class="mini-item-title">暂无未读告警</div>
-            <p class="mini-item-copy">本地规则审方产生的高风险和人工复核提醒会沉淀为通知记录。</p>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeAdminPanel === 'resources'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">排班 / 药品</h3>
-              <p class="section-copy">医生排班和药品库是挂号与开方的前置数据。</p>
-            </div>
-            <div class="action-row">
-              <button class="button-secondary" type="button" @click="createNew('schedule')"><ArrowDownUp :size="16" /><span>新排班</span></button>
-              <button class="button-secondary" type="button" @click="createNew('drug')"><Copy :size="16" /><span>新药品</span></button>
-            </div>
-          </div>
-
-          <div class="detail-grid two">
-            <ul class="mini-list overflow-list">
-              <li v-for="schedule in visibleSchedules" :key="schedule.id" class="mini-item" @click="selectSchedule(schedule)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ schedule.workDate }} · {{ schedule.period }}</div>
-                  <span class="pill">{{ schedule.remainingSlots ?? 0 }}/{{ schedule.totalSlots ?? 0 }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ schedule.departmentName || '未分科' }}</span>
-                  <span>{{ schedule.doctorName || '未知医生' }}</span>
-                  <span>{{ formatStatus(schedule.status) }}</span>
-                </div>
-              </li>
-            </ul>
-
-            <ul class="mini-list overflow-list">
-              <li v-for="drug in drugs" :key="drug.id" class="mini-item" @click="selectDrug(drug)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ drug.name }}</div>
-                  <span class="pill">{{ drug.code }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ drug.specification || '无规格' }}</span>
-                  <span>{{ drug.dosageForm || '无剂型' }}</span>
-                  <span>{{ formatStatus(drug.status) }}</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeAdminPanel === 'config'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">规则 / 配置 / 模板</h3>
-              <p class="section-copy">这里先保留本地规则与外部 AI Provider 的配置落点，后续接豆包时直接扩展适配器即可。</p>
-            </div>
-            <div class="action-row">
-              <button class="button-secondary" type="button" @click="createNew('rule')"><BadgeCheck :size="16" /><span>新规则</span></button>
-              <button class="button-secondary" type="button" @click="createNew('ai')"><Sparkles :size="16" /><span>新配置</span></button>
-              <button class="button-secondary" type="button" @click="createNew('prompt')"><CalendarDays :size="16" /><span>新模板</span></button>
-            </div>
-          </div>
-
-          <div class="detail-grid three">
-            <ul class="mini-list overflow-list">
-              <li v-for="rule in rules" :key="rule.id" class="mini-item" @click="selectRule(rule)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ rule.ruleCode }}</div>
-                  <span class="pill">{{ rule.riskLevel || 'UNKNOWN' }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ rule.ruleType }}</span>
-                  <span>{{ formatStatus(rule.status) }}</span>
-                </div>
-              </li>
-            </ul>
-
-            <ul class="mini-list overflow-list">
-              <li v-for="config in aiConfigs" :key="config.id" class="mini-item" @click="selectAi(config)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ config.provider }} / {{ config.modelName }}</div>
-                  <span class="pill" :data-tone="config.enabled ? 'healthy' : 'danger'">{{ config.enabled ? '启用' : '停用' }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ config.taskScope }}</span>
-                  <span>{{ config.configVersion }}</span>
-                </div>
-              </li>
-            </ul>
-
-            <ul class="mini-list overflow-list">
-              <li v-for="template in promptTemplates" :key="template.id" class="mini-item" @click="selectPrompt(template)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">{{ template.templateCode }}</div>
-                  <span class="pill">{{ template.taskType }}</span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ template.deptCode || '通用' }}</span>
-                  <span>{{ formatStatus(template.status) }}</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </section>
-      </div>
-
-      <div class="stack" v-show="activeAdminPanel === 'master' || activeAdminPanel === 'resources' || activeAdminPanel === 'config' || activeAdminPanel === 'audit'">
-        <section class="section" v-show="activeAdminPanel === 'master' || activeAdminPanel === 'resources' || activeAdminPanel === 'config'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">编辑面板</h3>
-              <p class="section-copy">点击左侧资源即可编辑当前项，保存后自动刷新。</p>
-            </div>
-            <div class="action-row">
-              <button class="button-secondary" type="button" @click="saveCurrent" :disabled="saving">
-                <CirclePlus :size="16" />
-                <span>{{ saving ? '保存中' : currentId ? '保存修改' : '新增保存' }}</span>
-              </button>
-              <button class="button-ghost" type="button" @click="toggleCurrent" :disabled="saving || !currentId">
-                <BadgeCheck :size="16" />
-                <span>启停切换</span>
-              </button>
-            </div>
-          </div>
-
-          <div v-if="currentKind === 'department'" class="stack">
-            <div class="field-grid">
-              <label class="field"><span>编码</span><input v-model="departmentForm.code" /></label>
-              <label class="field"><span>名称</span><input v-model="departmentForm.name" /></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>类型</span><input v-model="departmentForm.type" /></label>
-              <label class="field"><span>状态</span><input v-model="departmentForm.status" /></label>
-            </div>
-            <label class="field"><span>说明</span><textarea v-model="departmentForm.description" class="textarea" /></label>
-          </div>
-
-          <div v-else-if="currentKind === 'doctor'" class="stack">
-            <div class="field-grid">
-              <label class="field"><span>账号</span><input v-model="doctorForm.username" /></label>
-              <label class="field"><span>密码</span><input v-model="doctorForm.password" type="password" placeholder="编辑时留空表示不修改" /></label>
-              <label class="field"><span>姓名</span><input v-model="doctorForm.name" /></label>
-              <label class="field"><span>科室 ID</span><input v-model.number="doctorForm.departmentId" type="number" min="1" /></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>职称</span><input v-model="doctorForm.title" /></label>
-              <label class="field"><span>专长</span><input v-model="doctorForm.specialty" /></label>
-              <label class="field"><span>状态</span><input v-model="doctorForm.status" /></label>
-            </div>
-            <label class="field"><span>介绍</span><textarea v-model="doctorForm.introduction" class="textarea" /></label>
-          </div>
-
-          <div v-else-if="currentKind === 'schedule'" class="stack">
-            <div class="field-grid">
-              <label class="field"><span>医生 ID</span><input v-model.number="scheduleForm.doctorId" type="number" min="1" /></label>
-              <label class="field"><span>科室 ID</span><input v-model.number="scheduleForm.departmentId" type="number" min="1" /></label>
-              <label class="field"><span>日期</span><input v-model="scheduleForm.workDate" type="date" /></label>
-              <label class="field"><span>时段</span><input v-model="scheduleForm.period" /></label>
-              <label class="field"><span>总号源</span><input v-model.number="scheduleForm.totalSlots" type="number" min="1" /></label>
-              <label class="field"><span>剩余号源</span><input v-model.number="scheduleForm.remainingSlots" type="number" min="0" /></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>级别</span><input v-model="scheduleForm.visitLevel" /></label>
-              <label class="field"><span>状态</span><input v-model="scheduleForm.status" /></label>
-            </div>
-          </div>
-
-          <div v-else-if="currentKind === 'drug'" class="stack">
-            <div class="field-grid">
-              <label class="field"><span>编码</span><input v-model="drugForm.code" /></label>
-              <label class="field"><span>名称</span><input v-model="drugForm.name" /></label>
-              <label class="field"><span>拼音码</span><input v-model="drugForm.pinyinCode" /></label>
-              <label class="field"><span>规格</span><input v-model="drugForm.specification" /></label>
-              <label class="field"><span>剂型</span><input v-model="drugForm.dosageForm" /></label>
-              <label class="field"><span>包装</span><input v-model="drugForm.packageUnit" /></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>厂家</span><input v-model="drugForm.manufacturer" /></label>
-              <label class="field"><span>单价</span><input v-model.number="drugForm.unitPrice" type="number" min="0" step="0.01" /></label>
-              <label class="field"><span>状态</span><input v-model="drugForm.status" /></label>
-            </div>
-            <label class="field"><span>默认用法</span><textarea v-model="drugForm.defaultUsage" class="textarea" /></label>
-            <label class="field"><span>禁忌</span><textarea v-model="drugForm.contraindications" class="textarea" /></label>
-            <label class="field"><span>注意事项</span><textarea v-model="drugForm.precautions" class="textarea" /></label>
-            <label class="field"><span>适应症</span><textarea v-model="drugForm.indications" class="textarea" /></label>
-            <label class="field"><span>相互作用</span><textarea v-model="drugForm.interactionSummary" class="textarea" /></label>
-          </div>
-
-          <div v-else-if="currentKind === 'rule'" class="stack">
-            <div class="field-grid">
-              <label class="field"><span>规则码</span><input v-model="ruleForm.ruleCode" /></label>
-              <label class="field"><span>类型</span><input v-model="ruleForm.ruleType" /></label>
-              <label class="field"><span>风险级别</span><input v-model="ruleForm.riskLevel" /></label>
-              <label class="field"><span>状态</span><input v-model="ruleForm.status" /></label>
-            </div>
-            <label class="field"><span>适用药品</span><textarea v-model="ruleForm.applicableDrugs" class="textarea" /></label>
-            <label class="field"><span>适用病种</span><textarea v-model="ruleForm.applicableDiseases" class="textarea" /></label>
-            <label class="field"><span>适用人群</span><textarea v-model="ruleForm.applicablePopulations" class="textarea" /></label>
-            <label class="field"><span>条件表达式</span><textarea v-model="ruleForm.conditionExpression" class="textarea" /></label>
-            <label class="field"><span>告警</span><textarea v-model="ruleForm.alertMessage" class="textarea" /></label>
-            <label class="field"><span>建议</span><textarea v-model="ruleForm.suggestion" class="textarea" /></label>
-            <label class="field"><span>依据</span><textarea v-model="ruleForm.basis" class="textarea" /></label>
-          </div>
-
-          <div v-else-if="currentKind === 'ai'" class="stack">
-            <div class="field-grid">
-              <label class="field"><span>Provider</span><input v-model="aiForm.provider" placeholder="先可用 LOCAL_RULE，后续再接豆包" /></label>
-              <label class="field"><span>模型</span><input v-model="aiForm.modelName" /></label>
-              <label class="field"><span>任务范围</span><input v-model="aiForm.taskScope" /></label>
-              <label class="field"><span>状态</span><input v-model="aiForm.status" /></label>
-              <label class="field"><span>超时秒数</span><input v-model.number="aiForm.timeoutSeconds" type="number" min="1" /></label>
-              <label class="field"><span>优先级</span><input v-model.number="aiForm.priority" type="number" min="0" /></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>默认配置</span><input v-model="aiForm.defaultConfig" type="checkbox" /></label>
-              <label class="field"><span>启用</span><input v-model="aiForm.enabled" type="checkbox" /></label>
-              <label class="field"><span>健康状态</span><input v-model="aiForm.healthStatus" /></label>
-              <label class="field"><span>版本</span><input v-model="aiForm.configVersion" /></label>
-            </div>
-            <label class="field"><span>API URL</span><input v-model="aiForm.apiUrl" placeholder="后续接外部 AI 时再填" /></label>
-            <label class="field"><span>API Key</span><input v-model="aiForm.apiKey" type="password" placeholder="仅保存，不展示" /></label>
-            <label class="field"><span>Key Version</span><input v-model="aiForm.keyVersion" /></label>
-          </div>
-
-          <div v-else class="stack">
-            <div class="field-grid">
-              <label class="field"><span>模板编码</span><input v-model="promptForm.templateCode" /></label>
-              <label class="field"><span>任务类型</span><input v-model="promptForm.taskType" /></label>
-              <label class="field"><span>科室编码</span><input v-model="promptForm.deptCode" /></label>
-              <label class="field"><span>状态</span><input v-model="promptForm.status" /></label>
-              <label class="field"><span>版本</span><input v-model.number="promptForm.version" type="number" min="0" /></label>
-            </div>
-            <label class="field"><span>模板正文</span><textarea v-model="promptForm.templateBody" class="textarea" /></label>
-            <label class="field"><span>变量白名单</span><textarea v-model="promptForm.variableWhitelist" class="textarea" /></label>
-            <label class="field"><span>默认模板</span><input v-model="promptForm.defaultTemplate" type="checkbox" /></label>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeAdminPanel === 'audit'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">最近记录</h3>
-              <p class="section-copy">审计、AI 调用和看板继续保留，方便演示追溯链路。</p>
-            </div>
-          </div>
-
-          <div class="mini-list overflow-list">
-            <div class="mini-item" v-for="record in aiRecords.slice(0, 6)" :key="record.id">
-              <div class="mini-item-head">
-                <div class="mini-item-title">{{ record.taskType }}</div>
-                <span class="pill">{{ record.callStatus }}</span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ record.provider || 'LOCAL' }}</span>
-                <span>{{ record.operatorRole || 'unknown' }}</span>
-                <span>{{ formatDateTime(record.createdAt) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="mini-list overflow-list">
-            <div class="mini-item" v-for="audit in auditLogs.slice(0, 6)" :key="audit.id">
-              <div class="mini-item-head">
-                <div class="mini-item-title">{{ audit.action }}</div>
-                <span class="pill" :data-tone="audit.success ? 'healthy' : 'danger'">{{ audit.success ? '成功' : '失败' }}</span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ audit.actorRole || 'unknown' }}</span>
-                <span>{{ audit.resourceType || 'NO_RESOURCE' }}</span>
-                <span>{{ formatDateTime(audit.occurredAt) }}</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeAdminPanel === 'audit'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">当前上下文</h3>
-              <p class="section-copy">帮助你知道现在正在改哪一类资源。</p>
-            </div>
-          </div>
-
-          <div class="mini-list">
-            <div class="mini-item">
-              <span class="label">当前资源</span>
-              <span class="value">{{ currentKind }} {{ currentId ? `#${currentId}` : '新建' }}</span>
-            </div>
-            <div class="mini-item">
-              <span class="label">科室筛选</span>
-              <span class="value">{{ selectedDepartment?.name || '全部科室' }}</span>
-            </div>
-            <div class="mini-item">
-              <span class="label">医生筛选</span>
-              <span class="value">{{ selectedDoctor?.name || '全部医生' }}</span>
-            </div>
-            <div class="mini-item">
-              <span class="label">排班数量</span>
-              <span class="value">{{ visibleSchedules.length }}</span>
-            </div>
-          </div>
-        </section>
-      </div>
+      <component :is="adminPanelComponent" :workspace="adminWorkspace" />
+      <AdminEditorPanel :workspace="adminWorkspace" v-show="activeAdminPanel !== 'overview'" />
     </div>
   </section>
 </template>

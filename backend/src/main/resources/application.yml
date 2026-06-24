@@ -20,6 +20,17 @@ spring:
 server:
   port: ${SERVER_PORT:8088}
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
 app:
   security:
     jwt-secret: cloud-brain-medical-dev-secret-change-me

@@ -1,20 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import {
-  Activity,
-  CheckCircle2,
   ClipboardList,
-  FilePenLine,
-  FileText,
   BellRing,
-  Plus,
   RefreshCw,
-  Search,
-  Send,
   Stethoscope,
-  Trash2,
   UserRound,
-  Pill,
 } from 'lucide-vue-next';
 
 import {
@@ -43,8 +34,11 @@ import {
   searchDrugs,
   submitPrescription,
 } from '@/api/workflow';
-import DashboardCharts from '@/components/DashboardCharts.vue';
 import { useAuthStore } from '@/stores/auth';
+import DoctorConsultationPanel from '@/views/doctor/panels/DoctorConsultationPanel.vue';
+import DoctorHistoryPanel from '@/views/doctor/panels/DoctorHistoryPanel.vue';
+import DoctorOverviewPanel from '@/views/doctor/panels/DoctorOverviewPanel.vue';
+import DoctorSchedulePanel from '@/views/doctor/panels/DoctorSchedulePanel.vue';
 import type {
   AiUsageStats,
   ConsultationWorkspace,
@@ -151,6 +145,18 @@ const doctorPanels = [
 ] as const;
 
 const activeDoctorPanel = ref<(typeof doctorPanels)[number]['id']>('overview');
+const doctorPanelComponent = computed(() => {
+  switch (activeDoctorPanel.value) {
+    case 'consultation':
+      return DoctorConsultationPanel;
+    case 'history':
+      return DoctorHistoryPanel;
+    case 'schedule':
+      return DoctorSchedulePanel;
+    default:
+      return DoctorOverviewPanel;
+  }
+});
 
 const filteredPrescriptions = computed(() => {
   const keyword = drugSearch.value.trim().toLowerCase();
@@ -169,6 +175,92 @@ const filteredPrescriptions = computed(() => {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(keyword));
   });
+});
+
+const doctorWorkspace = reactive({
+  authStore,
+  loading,
+  workspaceLoading,
+  error,
+  doctor,
+  dashboard,
+  dashboardTrends,
+  aiUsage,
+  prescriptionReviewRate,
+  riskDistribution,
+  triageAccuracy,
+  queue,
+  schedules,
+  workspace,
+  medicalRecords,
+  prescriptions,
+  notifications,
+  availableDrugs,
+  diagnosisSuggestion,
+  reviewResult,
+  selectedRegistrationId,
+  recordSearch,
+  drugSearch,
+  itemSeed,
+  savingRecord,
+  generatingRecord,
+  diagnosingRecord,
+  reviewingPrescription,
+  submittingPrescription,
+  startingConsultation,
+  completingConsultation,
+  notificationLoading,
+  ackingNotificationId,
+  notificationSocketState,
+  streamText,
+  activeStreamSessionId,
+  consultationForm,
+  recordForm,
+  manualConfirmation,
+  prescriptionItems,
+  selectedRegistration,
+  overviewTone,
+  workspaceTone,
+  unreadNotificationCount,
+  doctorPanels,
+  activeDoctorPanel,
+  filteredPrescriptions,
+  formatDateTime,
+  formatDate,
+  truncate,
+  buildWsUrl,
+  riskTone,
+  emptyRecordForm,
+  applyMedicalRecordDraft,
+  applyDiagnosisResult,
+  syncFormsFromWorkspace,
+  loadWorkspaceSnapshot,
+  loadHistory,
+  loadDrugCatalog,
+  loadNotifications,
+  upsertNotification,
+  connectNotificationSocket,
+  closeRealtimeChannels,
+  loadDashboardBundle,
+  refreshAll,
+  selectRegistration,
+  addPrescriptionItem,
+  removePrescriptionItem,
+  applyDrugDefaults,
+  buildPrescriptionPayload,
+  beginSelectedConsultation,
+  diagnoseCurrentCase,
+  generateDraftMedicalRecord,
+  parseSsePayload,
+  startAiStream,
+  saveCurrentMedicalRecord,
+  reviewCurrentPrescription,
+  submitCurrentPrescription,
+  ackNotification,
+  completeSelectedConsultation,
+  setActiveDoctorPanel: (panel: (typeof doctorPanels)[number]['id']) => {
+    activeDoctorPanel.value = panel;
+  },
 });
 
 function createEmptyItem(): PrescriptionDraftItem {
@@ -755,11 +847,11 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="page">
-    <div class="band">
+    <div class="band workspace-shell">
       <div class="band-header">
         <div>
           <h2 class="band-title">医生工作台</h2>
-          <p class="band-copy">接诊队列、病历、诊断建议和处方审查都串在同一条工作流里。</p>
+          <p class="band-copy">接诊、病历、审方和历史都收在一个工作区里，切换时不再堆在同一屏。</p>
         </div>
         <span class="status-chip" :data-tone="overviewTone">
           <span class="chip-dot" />
@@ -767,7 +859,7 @@ onBeforeUnmount(() => {
         </span>
       </div>
 
-      <div class="toolbar">
+      <div class="toolbar workspace-topline">
         <span class="pill">
           <Stethoscope :size="14" />
           <span>{{ doctor?.departmentName || '未分科' }}</span>
@@ -809,505 +901,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <section class="section workspace-overview" v-show="activeDoctorPanel === 'overview'">
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">工作台总览</h3>
-            <p class="section-copy">把当前队列、工作区和告警先放在这一屏，方便医生快速判断下一步。</p>
-          </div>
-          <button class="button-secondary" type="button" @click="activeDoctorPanel = 'consultation'">
-            <Stethoscope :size="16" />
-            <span>进入接诊</span>
-          </button>
-        </div>
-
-        <div class="detail-grid two">
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">当前患者</div>
-              <span class="pill">{{ selectedRegistration?.status || '空闲' }}</span>
-            </div>
-            <div class="mini-item-meta">
-              <span>{{ selectedRegistration?.patientName || '未选择' }}</span>
-              <span>{{ workspace?.registration.chiefComplaint || selectedRegistration?.chiefComplaint || '未记录' }}</span>
-            </div>
-            <p class="mini-item-copy">{{ workspace?.nextActions.join(' / ') || '请选择一个待接诊号源' }}</p>
-          </div>
-
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">实时状态</div>
-              <span class="pill" :data-tone="notificationSocketState === 'connected' ? 'healthy' : 'loading'">
-                WS {{ notificationSocketState }}
-              </span>
-            </div>
-            <div class="mini-item-meta">
-              <span>{{ unreadNotificationCount }} 条告警</span>
-              <span>{{ workspaceLoading ? '工作区加载中' : workspace ? '工作区已就绪' : '未打开工作区' }}</span>
-            </div>
-            <p class="mini-item-copy">风险告警会在这里优先显示，减少在长页面里来回找状态。</p>
-          </div>
-
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">队列长度</div>
-              <span class="pill">{{ dashboard?.waitingRegistrations ?? queue.length }}</span>
-            </div>
-            <p class="mini-item-copy">待接诊患者优先级清晰，适合门诊工作台的日常使用。</p>
-          </div>
-
-          <div class="mini-item">
-            <div class="mini-item-head">
-              <div class="mini-item-title">最近工作区</div>
-              <span class="pill">{{ formatDateTime(workspace?.registration.consultationStartTime) }}</span>
-            </div>
-            <p class="mini-item-copy">问诊、病历和处方都围绕当前工作区展开。</p>
-          </div>
-        </div>
-
-        <div class="action-row">
-          <button class="button-secondary" type="button" @click="activeDoctorPanel = 'consultation'">问诊 / 审方</button>
-          <button class="button-secondary" type="button" @click="activeDoctorPanel = 'history'">历史记录</button>
-          <button class="button-ghost" type="button" @click="activeDoctorPanel = 'schedule'">排班</button>
-        </div>
-      </section>
-
-      <div class="metric-grid" v-show="activeDoctorPanel === 'overview'">
-        <article class="metric">
-          <div class="card-head">
-            <h3>待接诊</h3>
-            <ClipboardList :size="18" />
-          </div>
-          <div class="metric-value">{{ dashboard?.waitingRegistrations ?? queue.length }}</div>
-          <p>当前队列中的待处理号源。</p>
-        </article>
-        <article class="metric">
-          <div class="card-head">
-            <h3>今日接诊</h3>
-            <Activity :size="18" />
-          </div>
-          <div class="metric-value">{{ dashboard?.todayVisits ?? 0 }}</div>
-          <p>当天已经进入接诊流程的记录。</p>
-        </article>
-        <article class="metric">
-          <div class="card-head">
-            <h3>病历</h3>
-            <FileText :size="18" />
-          </div>
-          <div class="metric-value">{{ dashboard?.medicalRecords ?? medicalRecords.length }}</div>
-          <p>医生端可见的病历总量。</p>
-        </article>
-        <article class="metric">
-          <div class="card-head">
-            <h3>处方</h3>
-            <Pill :size="18" />
-          </div>
-          <div class="metric-value">{{ dashboard?.prescriptions ?? prescriptions.length }}</div>
-          <p>已生成或提交的处方记录。</p>
-        </article>
-      </div>
-    </div>
-
-    <DashboardCharts
-      v-show="activeDoctorPanel === 'overview'"
-      :overview="dashboard"
-      :trends="dashboardTrends"
-      :ai-usage="aiUsage"
-      :prescription-review-rate="prescriptionReviewRate"
-      :risk-distribution="riskDistribution"
-      :triage-accuracy="triageAccuracy"
-    />
-
-    <div
-      class="detail-grid workspace-grid"
-      :class="{ 'workspace-grid-single': activeDoctorPanel !== 'overview' }"
-      v-show="activeDoctorPanel !== 'overview'"
-    >
-      <div class="stack" v-show="activeDoctorPanel === 'consultation'">
-        <section class="section" v-show="activeDoctorPanel === 'consultation'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">待接诊队列</h3>
-              <p class="section-copy">选择一个号源开始接诊，再进入病历、审方和结束流程。</p>
-            </div>
-            <button class="button-secondary" type="button" @click="beginSelectedConsultation" :disabled="startingConsultation">
-              <Stethoscope :size="16" />
-              <span>{{ startingConsultation ? '启动中' : '开始接诊' }}</span>
-            </button>
-          </div>
-
-          <ul class="mini-list overflow-list">
-            <li
-              v-for="registration in queue"
-              :key="registration.id"
-              class="mini-item"
-              :class="{ active: selectedRegistrationId === registration.id }"
-            >
-              <button class="candidate-item" type="button" @click="selectRegistration(registration.id)">
-                <div class="mini-item-head">
-                  <div class="mini-item-title">
-                    {{ registration.patientName || '匿名患者' }} · {{ registration.departmentName || '未分科' }}
-                  </div>
-                  <span class="pill" :data-tone="registration.status === 'WAITING' ? 'loading' : 'healthy'">
-                    {{ registration.status }}
-                  </span>
-                </div>
-                <div class="mini-item-meta">
-                  <span>{{ formatDate(registration.workDate) }} {{ registration.period || '' }}</span>
-                  <span>号源 #{{ registration.scheduleId }}</span>
-                  <span>病历 {{ registration.medicalRecordId ?? '未生成' }}</span>
-                </div>
-                <p class="mini-item-copy">{{ registration.chiefComplaint || '暂无主诉' }}</p>
-              </button>
-            </li>
-          </ul>
-
-          <div class="empty-state" v-if="!queue.length">当前没有待接诊号源。</div>
-        </section>
-
-        <section class="section" v-show="activeDoctorPanel === 'consultation'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">问诊与诊断</h3>
-              <p class="section-copy">本地规则根据问诊文本生成诊断建议和病历草稿。</p>
-            </div>
-            <div class="action-row">
-              <button class="button-secondary" type="button" @click="diagnoseCurrentCase" :disabled="diagnosingRecord">
-                <Search :size="16" />
-                <span>{{ diagnosingRecord ? '分析中' : '生成诊断' }}</span>
-              </button>
-              <button class="button-secondary" type="button" @click="generateDraftMedicalRecord" :disabled="generatingRecord">
-                <FilePenLine :size="16" />
-                <span>{{ generatingRecord ? '生成中' : '生成病历草稿' }}</span>
-              </button>
-            </div>
-          </div>
-
-          <label class="field">
-            <span>问诊对话</span>
-            <textarea v-model="consultationForm.conversationText" class="textarea" placeholder="记录患者主诉、现病史、查体要点等" />
-          </label>
-          <label class="field">
-            <span>诊疗方向</span>
-            <input v-model="consultationForm.diagnosisDirection" placeholder="可不填，系统会用本地规则推断" />
-          </label>
-
-          <div v-if="streamText || activeStreamSessionId" class="stream-output">
-            {{ streamText || 'SSE streaming...' }}
-          </div>
-
-          <div v-if="diagnosisSuggestion" class="section" style="padding: 0.85rem;">
-            <div class="section-head">
-              <div>
-                <h3 class="section-title">诊断建议</h3>
-                <p class="section-copy">{{ diagnosisSuggestion.summary }}</p>
-              </div>
-              <span class="pill" data-tone="healthy">{{ diagnosisSuggestion.adoptionStatus }}</span>
-            </div>
-            <p class="mini-item-copy">候选诊断：{{ diagnosisSuggestion.suggestedDiagnoses }}</p>
-            <p class="mini-item-copy">建议检查：{{ diagnosisSuggestion.suggestedExamItems }}</p>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeDoctorPanel === 'consultation'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">病历草稿</h3>
-              <p class="section-copy">生成后可继续手工修订，再保存成正式病历。</p>
-            </div>
-            <button class="button-secondary" type="button" @click="saveCurrentMedicalRecord" :disabled="savingRecord">
-              <CheckCircle2 :size="16" />
-              <span>{{ savingRecord ? '保存中' : '保存病历' }}</span>
-            </button>
-          </div>
-
-          <div class="field-grid">
-            <label class="field">
-              <span>主诉</span>
-              <input v-model="recordForm.chiefComplaint" placeholder="主诉" />
-            </label>
-            <label class="field">
-              <span>现病史</span>
-              <input v-model="recordForm.presentIllness" placeholder="现病史" />
-            </label>
-            <label class="field">
-              <span>既往史</span>
-              <input v-model="recordForm.pastHistory" placeholder="既往史" />
-            </label>
-            <label class="field">
-              <span>查体</span>
-              <input v-model="recordForm.physicalExam" placeholder="体格检查" />
-            </label>
-          </div>
-
-          <label class="field">
-            <span>初步诊断</span>
-            <textarea v-model="recordForm.preliminaryDiagnosis" class="textarea" placeholder="初步诊断" />
-          </label>
-          <label class="field">
-            <span>治疗计划</span>
-            <textarea v-model="recordForm.treatmentPlan" class="textarea" placeholder="治疗计划" />
-          </label>
-          <label class="field">
-            <span>医生备注</span>
-            <textarea v-model="recordForm.docNote" class="textarea" placeholder="补充说明" />
-          </label>
-          <label class="field">
-            <span class="toolbar">
-              <input v-model="recordForm.aiGenerated" type="checkbox" />
-              <span>标记为 AI 辅助生成</span>
-            </span>
-          </label>
-        </section>
-
-        <section class="section" v-show="activeDoctorPanel === 'consultation'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">处方审查与提交</h3>
-              <p class="section-copy">本地规则会先审查处方，再允许提交和绑定结果。</p>
-            </div>
-            <div class="action-row">
-              <button class="button-secondary" type="button" @click="reviewCurrentPrescription" :disabled="reviewingPrescription">
-                <Search :size="16" />
-                <span>{{ reviewingPrescription ? '审方中' : '处方审查' }}</span>
-              </button>
-              <button class="button-secondary" type="button" @click="submitCurrentPrescription" :disabled="submittingPrescription">
-                <Send :size="16" />
-                <span>{{ submittingPrescription ? '提交中' : '提交处方' }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="field-grid">
-            <label class="field">
-              <span>药品搜索</span>
-              <input v-model="drugSearch" placeholder="按名称或拼音搜索药品" />
-            </label>
-            <div class="action-row" style="align-self: end;">
-              <button class="button-secondary" type="button" @click="loadDrugCatalog">
-                <Search :size="16" />
-                <span>加载药品</span>
-              </button>
-              <button class="button-ghost" type="button" @click="addPrescriptionItem">
-                <Plus :size="16" />
-                <span>添加项目</span>
-              </button>
-            </div>
-          </div>
-
-          <ul class="mini-list">
-            <li v-for="item in prescriptionItems" :key="item.key" class="mini-item">
-              <div class="mini-item-head">
-                <div class="mini-item-title">处方项目</div>
-                <button class="button-ghost" type="button" @click="removePrescriptionItem(item.key)">
-                  <Trash2 :size="16" />
-                  <span>删除</span>
-                </button>
-              </div>
-
-              <div class="field-grid">
-                <label class="field">
-                  <span>药品</span>
-                  <select v-model="item.drugId" @change="applyDrugDefaults(item)">
-                    <option :value="null">请选择药品</option>
-                    <option v-for="drug in availableDrugs" :key="drug.id" :value="drug.id">
-                      {{ drug.name }}{{ drug.specification ? ` / ${drug.specification}` : '' }}
-                    </option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>剂量</span>
-                  <input v-model="item.dosage" placeholder="如 1" />
-                </label>
-                <label class="field">
-                  <span>频次</span>
-                  <input v-model="item.frequency" placeholder="如 bid / tid" />
-                </label>
-                <label class="field">
-                  <span>疗程</span>
-                  <input v-model="item.duration" placeholder="如 7天" />
-                </label>
-                <label class="field">
-                  <span>数量</span>
-                  <input v-model="item.quantity" placeholder="如 14" />
-                </label>
-              </div>
-
-              <label class="field">
-                <span>用法说明</span>
-                <input v-model="item.usageInstruction" placeholder="默认会带出药品用法" />
-              </label>
-            </li>
-          </ul>
-
-          <label class="field">
-            <span>医生确认</span>
-            <textarea v-model="manualConfirmation" class="textarea" placeholder="说明本次审方确认内容" />
-          </label>
-
-          <div v-if="reviewResult" class="section" style="padding: 0.85rem;">
-            <div class="section-head">
-              <div>
-                <h3 class="section-title">审方结果</h3>
-                <p class="section-copy">{{ reviewResult.llmSummary || reviewResult.llmSuggestion }}</p>
-              </div>
-              <span class="pill" :data-tone="reviewResult.riskLevel === 'HIGH' ? 'danger' : reviewResult.riskLevel === 'MEDIUM' ? 'loading' : 'healthy'">
-                {{ reviewResult.riskLevel || 'UNKNOWN' }}
-              </span>
-            </div>
-            <p class="mini-item-copy">规则命中：{{ reviewResult.localRuleHits || '无' }}</p>
-            <p class="mini-item-copy">缺失上下文：{{ reviewResult.contextMissingItems || '无' }}</p>
-            <p class="mini-item-copy">绑定状态：{{ reviewResult.bindStatus }}</p>
-          </div>
-        </section>
-      </div>
-
-      <div class="stack" v-show="activeDoctorPanel === 'history' || activeDoctorPanel === 'schedule'">
-        <section class="section" v-show="activeDoctorPanel === 'history'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">风险告警</h3>
-              <p class="section-copy">处方审查产生的未读提醒，支持推送失败后的补拉确认。</p>
-            </div>
-            <button class="button-ghost" type="button" @click="loadNotifications" :disabled="notificationLoading">
-              <BellRing :size="16" :class="{ spinning: notificationLoading }" />
-              <span>{{ unreadNotificationCount }} 条</span>
-            </button>
-          </div>
-
-          <ul v-if="notifications.length" class="mini-list overflow-list">
-            <li v-for="notice in notifications" :key="notice.id" class="mini-item">
-              <div class="mini-item-head">
-                <div class="mini-item-title">{{ notice.patientSummary || notice.alertType }}</div>
-                <span class="pill" :data-tone="riskTone(notice.displayLevel)">{{ notice.displayLevel || notice.alertType }}</span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ notice.alertType }}</span>
-                <span>{{ notice.statisticsBucket || 'NO_BUCKET' }}</span>
-                <span>{{ formatDateTime(notice.createdAt) }}</span>
-              </div>
-              <p class="mini-item-copy">{{ truncate(notice.riskSummary, 120) }}</p>
-              <div class="action-row">
-                <button class="button-ghost" type="button" @click="ackNotification(notice.id)" :disabled="ackingNotificationId === notice.id">
-                  <CheckCircle2 :size="16" />
-                  <span>{{ ackingNotificationId === notice.id ? '标记中' : '标记已读' }}</span>
-                </button>
-              </div>
-            </li>
-          </ul>
-          <div v-else class="mini-item">
-            <div class="mini-item-title">暂无未读告警</div>
-            <p class="mini-item-copy">本地规则审方的高风险和需人工复核提醒会出现在这里。</p>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeDoctorPanel === 'history'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">工作区摘要</h3>
-              <p class="section-copy">当前接诊的状态、待办和最新记录。</p>
-            </div>
-            <button class="button-secondary" type="button" @click="completeSelectedConsultation" :disabled="completingConsultation">
-              <CheckCircle2 :size="16" />
-              <span>{{ completingConsultation ? '结束中' : '结束就诊' }}</span>
-            </button>
-          </div>
-
-          <div class="mini-list">
-            <div class="mini-item">
-              <span class="label">患者</span>
-              <span class="value">{{ workspace?.registration.patientName || selectedRegistration?.patientName || '未选择' }}</span>
-            </div>
-            <div class="mini-item">
-              <span class="label">主诉</span>
-              <span class="value">{{ workspace?.registration.chiefComplaint || selectedRegistration?.chiefComplaint || '未记录' }}</span>
-            </div>
-            <div class="mini-item">
-              <span class="label">下一步</span>
-              <span class="value">{{ workspace?.nextActions.join(' / ') || '请选择号源' }}</span>
-            </div>
-            <div class="mini-item">
-              <span class="label">接诊时间</span>
-              <span class="value">{{ formatDateTime(workspace?.registration.consultationStartTime) }}</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="section" v-show="activeDoctorPanel === 'history'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">病历与处方历史</h3>
-              <p class="section-copy">支持本地搜索，方便从历史记录中回看上下文。</p>
-            </div>
-          </div>
-
-          <div class="field-grid">
-            <label class="field">
-              <span>病历搜索</span>
-              <input v-model="recordSearch" placeholder="按患者、主诉或诊断搜索" />
-            </label>
-            <div class="action-row" style="align-self: end;">
-              <button class="button-secondary" type="button" @click="loadHistory">
-                <Search :size="16" />
-                <span>查询病历</span>
-              </button>
-            </div>
-          </div>
-
-          <ul class="mini-list overflow-list">
-            <li v-for="record in medicalRecords" :key="record.id" class="mini-item">
-              <div class="mini-item-head">
-                <div class="mini-item-title">{{ record.patientName || '匿名患者' }}</div>
-                <span class="pill">{{ formatDateTime(record.createdAt) }}</span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ record.departmentName || '未分科' }}</span>
-                <span>{{ record.preliminaryDiagnosis || '待明确' }}</span>
-              </div>
-              <p class="mini-item-copy">{{ truncate(record.treatmentPlan || record.presentIllness) }}</p>
-            </li>
-          </ul>
-
-          <ul class="mini-list overflow-list">
-            <li v-for="prescription in filteredPrescriptions" :key="prescription.id" class="mini-item">
-              <div class="mini-item-head">
-                <div class="mini-item-title">处方 #{{ prescription.id }}</div>
-                <span class="pill" :data-tone="prescription.review?.reviewStatus === 'BOUND' ? 'healthy' : 'loading'">
-                  {{ prescription.review?.reviewStatus || prescription.status }}
-                </span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ prescription.patientName || '匿名患者' }}</span>
-                <span>{{ prescription.departmentName || '未分科' }}</span>
-                <span>{{ prescription.riskLevel || 'UNKNOWN' }}</span>
-              </div>
-              <p class="mini-item-copy">{{ truncate(prescription.review?.llmSummary || prescription.review?.llmSuggestion) }}</p>
-            </li>
-          </ul>
-        </section>
-
-        <section class="section" v-show="activeDoctorPanel === 'schedule'">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">排班</h3>
-              <p class="section-copy">医生自己的可用排班，便于查看号源安排。</p>
-            </div>
-          </div>
-
-          <ul class="mini-list overflow-list">
-            <li v-for="schedule in schedules" :key="schedule.id" class="mini-item">
-              <div class="mini-item-head">
-                <div class="mini-item-title">{{ formatDate(schedule.workDate) }} · {{ schedule.period }}</div>
-                <span class="pill">{{ schedule.remainingSlots ?? 0 }}/{{ schedule.totalSlots ?? 0 }}</span>
-              </div>
-              <div class="mini-item-meta">
-                <span>{{ schedule.departmentName || '未分科' }}</span>
-                <span>{{ schedule.visitLevel || '普通门诊' }}</span>
-              </div>
-            </li>
-          </ul>
-        </section>
-      </div>
+      <component :is="doctorPanelComponent" :workspace="doctorWorkspace" />
     </div>
   </section>
 </template>
