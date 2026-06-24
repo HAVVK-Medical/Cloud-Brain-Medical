@@ -4,7 +4,19 @@ JDK:
 - Java 17
 - Default path: `C:\Program Files\Java\jdk-17`
 
-Backend with MySQL:
+Backend with project-local MySQL (recommended on this machine):
+```powershell
+.\start-backend-mysql.ps1
+```
+
+This starts a project-local MySQL instance on `127.0.0.1:3307`, creates database `cloudbrain_medical`, creates user `cloudbrain / cloudbrain_dev`, and starts the backend with the `mysql` profile.
+
+If port `8080` is already occupied:
+```powershell
+.\start-backend-mysql.ps1 -Port 8081
+```
+
+Backend with Docker MySQL:
 ```powershell
 docker compose -f docker-compose.mysql.yml up -d
 
