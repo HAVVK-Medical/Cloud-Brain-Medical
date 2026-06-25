@@ -39,8 +39,8 @@ public class ChatController {
 
     @GetMapping("/sessions/{id}/messages")
     public Result<List<ChatMessageEntity>> getMessages(@PathVariable Long id) {
-        ActorContextResolver.requireCurrent();
-        List<ChatMessageEntity> messages = chatService.getMessages(id);
+        ActorContext ctx = ActorContextResolver.requireCurrent();
+        List<ChatMessageEntity> messages = chatService.getMessages(id, ctx.userId());
         return Result.success(messages);
     }
 
