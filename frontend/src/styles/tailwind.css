@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-brand: #0D7C73;
+  --color-brand-soft: #E6F4F2;
+  --color-brand-deep: #095952;
+  --color-surface: #F7FAF8;
+  --color-card: #FFFFFF;
+  --color-text-main: #1B2B2A;
+  --color-text-secondary: #6B7D7B;
+  --color-border: #DEE7E5;
+  --color-danger: #DC4E3E;
+  --color-warning: #E8952C;
+  --color-success: #3D9142;
+  --color-info: #3B82C5;
+
+  --font-sans: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-text-main font-sans antialiased;
+    font-size: 14px;
+  }
+
+  .phone-input {
+    font-size: 16px;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-deep disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-text-main transition hover:bg-brand-soft disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-danger px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm text-text-secondary transition hover:bg-brand-soft hover:text-text-main disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .card {
+    @apply rounded-lg border border-border bg-card p-5;
+  }
+
+  .input-field {
+    @apply w-full rounded-md border border-border bg-white px-3 py-2 text-sm placeholder:text-text-secondary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand;
+  }
+
+  .label-text {
+    @apply block text-sm font-medium text-text-main mb-1;
+  }
+}
