@@ -18,7 +18,18 @@ spring:
     enabled: true
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8088}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
 
 app:
   security:

@@ -9,6 +9,8 @@ public interface TriageRecordJpaRepository extends JpaRepository<TriageRecordEnt
 
     List<TriageRecordEntity> findByPatientIdOrderByCreatedAtDesc(Long patientId);
 
+    List<TriageRecordEntity> findAllByOrderByCreatedAtDesc();
+
     Optional<TriageRecordEntity> findByRegistrationId(Long registrationId);
 
     List<TriageRecordEntity> findByPatientIdAndRegistrationIdIsNullOrderByCreatedAtDesc(Long patientId);

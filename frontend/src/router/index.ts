@@ -2,12 +2,9 @@ import { createRouter, createWebHistory } from 'vue-router';
 
 import { pinia } from '@/stores/pinia';
 import { useAuthStore } from '@/stores/auth';
-import AdminHomeView from '@/views/admin/AdminHomeView.vue';
 import AuthView from '@/views/auth/AuthView.vue';
-import DoctorHomeView from '@/views/doctor/DoctorHomeView.vue';
 import HealthView from '@/views/HealthView.vue';
 import HomeView from '@/views/HomeView.vue';
-import PatientHomeView from '@/views/patient/PatientHomeView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -30,29 +27,47 @@ const router = createRouter({
     {
       path: '/patient',
       name: 'patient',
-      component: PatientHomeView,
+      component: () => import('@/views/patient/PatientHomeView.vue'),
       meta: { requiresAuth: true, role: 'patient' },
     },
     {
       path: '/doctor',
       name: 'doctor',
-      component: DoctorHomeView,
+      component: () => import('@/views/doctor/DoctorHomeView.vue'),
       meta: { requiresAuth: true, role: 'doctor' },
     },
     {
       path: '/admin',
       name: 'admin',
-      component: AdminHomeView,
+      component: () => import('@/views/admin/AdminHomeView.vue'),
       meta: { requiresAuth: true, role: 'admin' },
     },
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore(pinia);
 
   if (!authStore.hydrated) {
     authStore.hydrateFromStorage();
+  }
+
+  if (authStore.isAuthenticated && authStore.isExpired) {
+    if (!authStore.refreshToken) {
+      return {
+        path: '/login',
+        query: { redirect: to.fullPath, role: to.meta.role },
+      };
+    }
+
+    try {
+      await authStore.refreshSession();
+    } catch {
+      return {
+        path: '/login',
+        query: { redirect: to.fullPath, role: to.meta.role },
+      };
+    }
   }
 
   if (!to.meta.requiresAuth) {

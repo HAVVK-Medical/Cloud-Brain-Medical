@@ -4,8 +4,12 @@ import com.cloudbrain.application.auth.AuthService;
 import com.cloudbrain.common.Result;
 import com.cloudbrain.dto.auth.LoginRequest;
 import com.cloudbrain.dto.auth.LoginResponse;
+import com.cloudbrain.dto.auth.LogoutRequest;
+import com.cloudbrain.dto.auth.RefreshRequest;
 import com.cloudbrain.dto.auth.RegisterRequest;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -40,5 +44,16 @@ public class AuthController {
     @PostMapping("/admin/login")
     public Result<LoginResponse> adminLogin(@Valid @RequestBody LoginRequest request) {
         return Result.success(authService.adminLogin(request));
+    }
+
+    @PostMapping("/refresh")
+    public Result<LoginResponse> refresh(@Valid @RequestBody RefreshRequest request) {
+        return Result.success(authService.refresh(request));
+    }
+
+    @PostMapping("/logout")
+    public Result<Void> logout(@Valid @RequestBody LogoutRequest request) {
+        authService.logout(request);
+        return Result.success("logged out", null);
     }
 }

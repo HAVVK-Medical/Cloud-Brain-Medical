@@ -53,7 +53,7 @@ function isActive(path: string) {
 }
 
 async function signOut() {
-  authStore.clearSession();
+  await authStore.logout();
   await router.push('/login');
 }
 

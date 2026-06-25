@@ -1,5 +1,5 @@
 import { http } from './http';
-import type { LoginRequest, LoginResponse, RegisterRequest, Result } from '@/types/api';
+import type { LoginRequest, LoginResponse, LogoutRequest, RefreshRequest, RegisterRequest, Result } from '@/types/api';
 import { getUiMessage } from '@/utils/zh';
 
 function requireData<T>(response: Result<T>) {
@@ -28,4 +28,14 @@ export async function doctorLogin(payload: LoginRequest) {
 export async function adminLogin(payload: LoginRequest) {
   const response = await http.post<Result<LoginResponse>>('/admin/login', payload);
   return requireData(response.data);
+}
+
+export async function refreshSession(payload: RefreshRequest) {
+  const response = await http.post<Result<LoginResponse>>('/auth/refresh', payload);
+  return requireData(response.data);
+}
+
+export async function logoutSession(payload: LogoutRequest) {
+  const response = await http.post<Result<null>>('/auth/logout', payload);
+  return response.data;
 }

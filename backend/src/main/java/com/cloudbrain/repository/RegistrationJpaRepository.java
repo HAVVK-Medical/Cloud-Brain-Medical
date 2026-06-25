@@ -2,6 +2,7 @@ package com.cloudbrain.repository;
 
 import com.cloudbrain.entity.core.RegistrationEntity;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -14,6 +15,10 @@ public interface RegistrationJpaRepository extends JpaRepository<RegistrationEnt
     List<RegistrationEntity> findByPatientIdOrderByRegistrationTimeDesc(Long patientId);
 
     List<RegistrationEntity> findByDoctorIdAndStatusOrderByRegistrationTimeAsc(Long doctorId, String status);
+
+    List<RegistrationEntity> findByDoctorIdAndStatusInOrderByRegistrationTimeAsc(Long doctorId, Collection<String> statuses);
+
+    List<RegistrationEntity> findByDoctorIdOrderByRegistrationTimeDesc(Long doctorId);
 
     Optional<RegistrationEntity> findFirstByPatientIdAndScheduleIdAndStatusNotOrderByRegistrationTimeDesc(
             Long patientId,

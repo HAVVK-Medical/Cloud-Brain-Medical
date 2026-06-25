@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -28,24 +29,37 @@ public class JwtTokenUtil {
     private final ObjectMapper objectMapper;
     private final String secret;
     private final Duration tokenTtl;
+    private final Duration refreshTokenTtl;
 
     public JwtTokenUtil(ObjectMapper objectMapper,
                         @Value("${app.security.jwt-secret:cloud-brain-medical-dev-secret-change-me}") String secret,
-                        @Value("${app.security.jwt-ttl-minutes:720}") long ttlMinutes) {
+                        @Value("${app.security.jwt-ttl-minutes:720}") long ttlMinutes,
+                        @Value("${app.security.refresh-ttl-minutes:10080}") long refreshTtlMinutes) {
         this.objectMapper = objectMapper;
         this.secret = secret;
         this.tokenTtl = Duration.ofMinutes(ttlMinutes);
+        this.refreshTokenTtl = Duration.ofMinutes(refreshTtlMinutes);
     }
 
     public Duration getTokenTtl() {
         return tokenTtl;
     }
 
+    public Duration getRefreshTokenTtl() {
+        return refreshTokenTtl;
+    }
+
     public String generateToken(ActorContext actorContext) {
+        return generateToken(actorContext, null);
+    }
+
+    public String generateToken(ActorContext actorContext, String tokenId) {
         Instant issuedAt = Instant.now();
         Instant expiresAt = issuedAt.plus(tokenTtl);
+        String resolvedTokenId = tokenId == null || tokenId.isBlank() ? java.util.UUID.randomUUID().toString() : tokenId;
 
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("jti", resolvedTokenId);
         payload.put("sub", actorContext.username());
         payload.put("uid", actorContext.userId());
         payload.put("role", actorContext.role().name());
@@ -74,6 +88,12 @@ public class JwtTokenUtil {
     public String getRoleFromToken(String token) {
         return parseClaims(token)
                 .map(claims -> String.valueOf(claims.get("role")).toUpperCase(Locale.ROOT))
+                .orElseThrow(() -> new ApiException(401, "invalid token"));
+    }
+
+    public String getTokenIdFromToken(String token) {
+        return parseClaims(token)
+                .map(claims -> String.valueOf(claims.get("jti")))
                 .orElseThrow(() -> new ApiException(401, "invalid token"));
     }
 
@@ -106,6 +126,20 @@ public class JwtTokenUtil {
             return Optional.of(claims);
         } catch (Exception exception) {
             return Optional.empty();
+        }
+    }
+
+    public String hashToken(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] encoded = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder();
+            for (byte b : encoded) {
+                builder.append(String.format("%02x", b));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
         }
     }
 

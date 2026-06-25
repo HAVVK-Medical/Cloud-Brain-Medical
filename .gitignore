@@ -14,6 +14,11 @@
 /frontend/.turbo/
 /.mvn/apache-maven-*
 /%USERPROFILE%/
+/.local-mysql/data/
+/.local-mysql/uploads/
+/.local-mysql/*.err
+/.local-mysql/*.log
+/.local-mysql/*.pid
 
 /.DS_Store
 /Thumbs.db

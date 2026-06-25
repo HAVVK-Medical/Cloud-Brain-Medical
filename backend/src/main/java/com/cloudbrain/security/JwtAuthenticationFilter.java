@@ -15,14 +15,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import com.cloudbrain.repository.SessionTokenJpaRepository;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenUtil jwtTokenUtil;
+    private final SessionTokenJpaRepository sessionTokenRepository;
 
-    public JwtAuthenticationFilter(JwtTokenUtil jwtTokenUtil) {
+    public JwtAuthenticationFilter(JwtTokenUtil jwtTokenUtil, SessionTokenJpaRepository sessionTokenRepository) {
         this.jwtTokenUtil = jwtTokenUtil;
+        this.sessionTokenRepository = sessionTokenRepository;
     }
 
     @Override
@@ -37,7 +40,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        extractToken(request).flatMap(jwtTokenUtil::parseActorContext).ifPresent(actorContext -> {
+        extractToken(request).flatMap(token -> {
+            String tokenHash = jwtTokenUtil.hashToken(token);
+            return sessionTokenRepository.findByTokenHashAndStatus(tokenHash, "ACTIVE")
+                    .filter(session -> session.getExpiresAt() == null || session.getExpiresAt().isAfter(java.time.Instant.now()))
+                    .flatMap(session -> jwtTokenUtil.parseActorContext(token));
+        }).ifPresent(actorContext -> {
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                     actorContext,
                     null,

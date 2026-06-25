@@ -23,6 +23,17 @@ public interface ScheduleJpaRepository extends JpaRepository<ScheduleEntity, Lon
             String status
     );
 
+    List<ScheduleEntity> findByStatusAndRemainingSlotsGreaterThanOrderByWorkDateAscPeriodAsc(
+            String status,
+            Integer remainingSlots
+    );
+
+    List<ScheduleEntity> findByDepartmentIdAndStatusAndRemainingSlotsGreaterThanOrderByWorkDateAscPeriodAsc(
+            Long departmentId,
+            String status,
+            Integer remainingSlots
+    );
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update ScheduleEntity schedule

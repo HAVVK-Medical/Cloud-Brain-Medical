@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 
-import { adminLogin, doctorLogin, patientLogin, patientRegister } from '@/api/auth';
+import { adminLogin, doctorLogin, logoutSession, patientLogin, patientRegister, refreshSession } from '@/api/auth';
 import { AUTH_STORAGE_KEY } from '@/constants/auth';
 import type { LoginRequest, LoginResponse, RegisterRequest } from '@/types/api';
 import type { WorkspaceRole } from '@/types/enums';
@@ -8,6 +8,7 @@ import { resolveUiErrorMessage } from '@/utils/zh';
 
 interface SessionState {
   token: string;
+  refreshToken: string;
   tokenType: string;
   userId: number | null;
   role: WorkspaceRole | null;
@@ -28,6 +29,7 @@ interface AuthState extends SessionState {
 
 const emptySession = (): SessionState => ({
   token: '',
+  refreshToken: '',
   tokenType: 'Bearer',
   userId: null,
   role: null,
@@ -41,6 +43,7 @@ const emptySession = (): SessionState => ({
 function toSession(response: LoginResponse): SessionState {
   return {
     token: response.token,
+    refreshToken: response.refreshToken,
     tokenType: response.tokenType,
     userId: response.userId,
     role: response.role,
@@ -152,6 +155,33 @@ export const useAuthStore = defineStore('auth', {
         throw error;
       } finally {
         this.loading = false;
+      }
+    },
+    async refreshSession() {
+      if (!this.refreshToken) {
+        throw new Error('login expired please re-login');
+      }
+
+      try {
+        const response = await refreshSession({ refreshToken: this.refreshToken });
+        this.persistSession(toSession(response));
+        return response;
+      } catch (error) {
+        this.degraded = true;
+        this.error = resolveUiErrorMessage(error, '鐧诲綍宸茶繃鏈燂紝璇烽噸鏂扮櫥褰?');
+        this.clearSession();
+        throw error;
+      }
+    },
+    async logout(reason = 'user logout') {
+      try {
+        if (this.refreshToken) {
+          await logoutSession({ refreshToken: this.refreshToken, reason });
+        }
+      } catch {
+        // local sign out still happens below
+      } finally {
+        this.clearSession();
       }
     },
   },
