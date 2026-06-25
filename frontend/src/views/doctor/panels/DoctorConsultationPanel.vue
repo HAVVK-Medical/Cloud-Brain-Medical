@@ -1,7 +1,74 @@
 <script setup lang="ts">
-import { Plus, Search, Send, Stethoscope, Trash2 } from 'lucide-vue-next';
+import { Plus, Search, Send, Sparkles, Stethoscope, Trash2 } from 'lucide-vue-next';
 
 const { workspace } = defineProps<{ workspace: any }>();
+
+// --- C3: Diagnosis helpers ---
+interface DiagnosisEntry { name: string; confidence: number }
+
+function parseDiagnoses(text: string): DiagnosisEntry[] {
+  if (!text) return [];
+  return text.split('\n').filter(Boolean).map(line => {
+    const match = line.match(/^(.+?)\s*(\d{1,3})%?\s*$/);
+    if (match) return { name: match[1].trim(), confidence: parseInt(match[2]) };
+    return { name: line.replace(/^[-*\d.]+\s*/, '').trim(), confidence: 0 };
+  });
+}
+
+function parseExamItems(text: string): string[] {
+  if (!text) return [];
+  return text.split('\n').filter(Boolean)
+    .map(line => line.replace(/^[-*\d.]+\s*/, '').trim());
+}
+
+function confidenceBg(conf: number): string {
+  if (conf >= 75) return '#d4edda';
+  if (conf >= 50) return '#fff3cd';
+  return '#f8f0ff';
+}
+
+function confidenceFg(conf: number): string {
+  if (conf >= 75) return '#155724';
+  if (conf >= 50) return '#856404';
+  return '#6f42c1';
+}
+
+function adoptDiagnosis(name: string) {
+  workspace.recordForm.preliminaryDiagnosis = name;
+}
+
+// --- C4: Prescription review helpers ---
+interface RuleHitEntry {
+  ruleName?: string;
+  alertMessage?: string;
+  suggestion?: string;
+  riskLevel?: string;
+}
+
+function parseRuleHits(raw: string | Record<string, unknown>[]): RuleHitEntry[] {
+  if (Array.isArray(raw)) return raw as RuleHitEntry[];
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as RuleHitEntry[]; }
+    catch { return []; }
+  }
+  return [];
+}
+
+function riskLabel(level: string | null | undefined): string {
+  switch ((level || '').toUpperCase()) {
+    case 'HIGH': case 'DANGER': case 'CRITICAL': return '🔴 高风险';
+    case 'MEDIUM': case 'WARNING': return '🟡 中风险';
+    default: return '🟢 低风险';
+  }
+}
+
+function riskBarClass(level: string | null | undefined): string {
+  switch ((level || '').toUpperCase()) {
+    case 'HIGH': case 'DANGER': case 'CRITICAL': return 'risk--high';
+    case 'MEDIUM': case 'WARNING': return 'risk--medium';
+    default: return 'risk--low';
+  }
+}
 </script>
 
 <template>
@@ -56,7 +123,7 @@ const { workspace } = defineProps<{ workspace: any }>();
               <span>{{ workspace.diagnosingRecord ? '生成中' : '生成诊断' }}</span>
             </button>
             <button class="button-secondary" type="button" @click="workspace.generateDraftMedicalRecord" :disabled="workspace.generatingRecord">
-              <Search :size="16" />
+              <Sparkles :size="16" />
               <span>{{ workspace.generatingRecord ? '生成中' : '生成病历草稿' }}</span>
             </button>
           </div>
@@ -75,16 +142,28 @@ const { workspace } = defineProps<{ workspace: any }>();
           {{ workspace.streamText || 'SSE streaming...' }}
         </div>
 
-        <div v-if="workspace.diagnosisSuggestion" class="section" style="padding: 0.85rem;">
-          <div class="section-head">
-            <div>
-              <h4 class="section-title">诊断建议</h4>
-              <p class="section-copy">{{ workspace.diagnosisSuggestion.summary }}</p>
-            </div>
-            <span class="pill" data-tone="healthy">{{ workspace.diagnosisSuggestion.adoptionStatus }}</span>
+        <div v-if="workspace.diagnosisSuggestion" class="diagnosis-suggestions">
+          <h4 class="suggestion-title">🤖 AI 诊断建议</h4>
+          <div v-if="workspace.diagnosisSuggestion.suggestedDiagnoses" class="diagnosis-tags">
+            <span
+              v-for="(diag, idx) in parseDiagnoses(workspace.diagnosisSuggestion.suggestedDiagnoses)"
+              :key="idx"
+              class="diagnosis-tag"
+              :style="{ background: confidenceBg(diag.confidence), color: confidenceFg(diag.confidence) }"
+            >
+              {{ diag.name }}
+              <span v-if="diag.confidence" class="diagnosis-tag__confidence">{{ diag.confidence }}%</span>
+              <button class="diagnosis-tag__adopt" @click="adoptDiagnosis(diag.name)">采纳</button>
+            </span>
           </div>
-          <p class="mini-item-copy">候选诊断：{{ workspace.diagnosisSuggestion.suggestedDiagnoses }}</p>
-          <p class="mini-item-copy">建议检查：{{ workspace.diagnosisSuggestion.suggestedExamItems }}</p>
+          <div v-if="workspace.diagnosisSuggestion.suggestedExamItems" class="exam-checklist">
+            <h5>建议检查项目</h5>
+            <label v-for="(exam, idx) in parseExamItems(workspace.diagnosisSuggestion.suggestedExamItems)"
+                   :key="idx" class="exam-item">
+              <input type="checkbox" />
+              <span>{{ exam }}</span>
+            </label>
+          </div>
         </div>
       </section>
     </div>
@@ -103,21 +182,99 @@ const { workspace } = defineProps<{ workspace: any }>();
         </div>
 
         <div class="field-grid">
-          <label class="field"><span>主诉</span><input v-model="workspace.recordForm.chiefComplaint" /></label>
-          <label class="field"><span>现病史</span><input v-model="workspace.recordForm.presentIllness" /></label>
-          <label class="field"><span>既往史</span><input v-model="workspace.recordForm.pastHistory" /></label>
-          <label class="field"><span>查体</span><input v-model="workspace.recordForm.physicalExam" /></label>
+          <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+            <label class="field">
+              <span>
+                主诉
+                <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+              </span>
+              <input v-model="workspace.recordForm.chiefComplaint" />
+            </label>
+          </div>
+          <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+            <label class="field">
+              <span>
+                现病史
+                <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+              </span>
+              <input v-model="workspace.recordForm.presentIllness" />
+            </label>
+          </div>
+          <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+            <label class="field">
+              <span>
+                既往史
+                <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+              </span>
+              <input v-model="workspace.recordForm.pastHistory" />
+            </label>
+          </div>
+          <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+            <label class="field">
+              <span>
+                查体
+                <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+              </span>
+              <input v-model="workspace.recordForm.physicalExam" />
+            </label>
+          </div>
         </div>
 
-        <label class="field"><span>初步诊断</span><textarea v-model="workspace.recordForm.preliminaryDiagnosis" class="textarea" /></label>
-        <label class="field"><span>治疗计划</span><textarea v-model="workspace.recordForm.treatmentPlan" class="textarea" /></label>
-        <label class="field"><span>医生备注</span><textarea v-model="workspace.recordForm.docNote" class="textarea" /></label>
+        <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+          <label class="field">
+            <span>
+              初步诊断
+              <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+              <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+            </span>
+            <textarea v-model="workspace.recordForm.preliminaryDiagnosis" class="textarea" />
+          </label>
+        </div>
+        <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+          <label class="field">
+            <span>
+              治疗计划
+              <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+              <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+            </span>
+            <textarea v-model="workspace.recordForm.treatmentPlan" class="textarea" />
+          </label>
+        </div>
+        <div class="record-field" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+          <label class="field">
+            <span>
+              医生备注
+              <span v-if="workspace.generatingRecord" class="streaming-cursor">▌</span>
+              <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+            </span>
+            <textarea v-model="workspace.recordForm.docNote" class="textarea" />
+          </label>
+        </div>
         <label class="field">
           <span class="toolbar">
             <input v-model="workspace.recordForm.aiGenerated" type="checkbox" />
             <span>标记为 AI 辅助生成</span>
           </span>
         </label>
+
+        <div class="record-ai-actions">
+          <button class="btn btn--ai" @click="workspace.generateDraftMedicalRecord"
+                  :disabled="workspace.generatingRecord">
+            <Sparkles :size="14" />
+            <span>{{ workspace.generatingRecord ? 'AI 生成中...' : 'AI 生成病历' }}</span>
+          </button>
+          <button class="btn btn--ghost" @click="workspace.saveCurrentMedicalRecord"
+                  :disabled="!workspace.recordForm.chiefComplaint">
+            采纳全部
+          </button>
+          <button class="btn btn--ghost" @click="workspace.generateDraftMedicalRecord">
+            重新生成
+          </button>
+        </div>
       </section>
 
       <section class="section subtle-section">
@@ -185,20 +342,198 @@ const { workspace } = defineProps<{ workspace: any }>();
           <textarea v-model="workspace.manualConfirmation" class="textarea" placeholder="说明本次审方确认内容" />
         </label>
 
-        <div v-if="workspace.reviewResult" class="section" style="padding: 0.85rem;">
-          <div class="section-head">
-            <div>
-              <h4 class="section-title">审方结果</h4>
-              <p class="section-copy">{{ workspace.reviewResult.llmSummary || workspace.reviewResult.llmSuggestion }}</p>
-            </div>
-            <span class="pill" :data-tone="workspace.reviewResult.riskLevel === 'HIGH' ? 'danger' : workspace.reviewResult.riskLevel === 'MEDIUM' ? 'loading' : 'healthy'">
-              {{ workspace.reviewResult.riskLevel || 'UNKNOWN' }}
-            </span>
+        <div v-if="workspace.reviewResult" class="review-result">
+          <div class="review-risk-bar" :class="riskBarClass(workspace.reviewResult.riskLevel)">
+            <span class="review-risk-bar__label">风险等级: {{ workspace.reviewResult.riskLevel || '未知' }}</span>
           </div>
-          <p class="mini-item-copy">规则命中：{{ workspace.reviewResult.localRuleHits || '无' }}</p>
-          <p class="mini-item-copy">上下文缺失：{{ workspace.reviewResult.contextMissingItems || '无' }}</p>
+
+          <div v-if="workspace.reviewResult.localRuleHits" class="review-section">
+            <h4 class="review-section__title">📋 本地规则引擎</h4>
+            <div v-for="(hit, idx) in parseRuleHits(workspace.reviewResult.localRuleHits)"
+                 :key="idx" class="rule-hit">
+              <span class="rule-hit__risk" :data-level="hit.riskLevel">
+                {{ riskLabel(hit.riskLevel) }}
+              </span>
+              <div class="rule-hit__body">
+                <strong>{{ hit.ruleName || hit.alertMessage }}</strong>
+                <p v-if="hit.alertMessage">{{ hit.alertMessage }}</p>
+                <p v-if="hit.suggestion" class="rule-hit__suggestion">💡 {{ hit.suggestion }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="workspace.reviewResult.llmSummary" class="review-section review-section--llm">
+            <h4 class="review-section__title">
+              🤖 AI 分析补充
+              <span class="ai-badge">AI 生成</span>
+            </h4>
+            <p class="llm-summary">{{ workspace.reviewResult.llmSummary }}</p>
+          </div>
         </div>
       </section>
     </div>
   </section>
 </template>
+
+<style scoped>
+/* C2: Streaming and AI styles */
+.ai-field--streaming {
+  border-left: 3px solid var(--primary);
+  padding-left: 10px;
+  background: var(--primary-soft);
+  transition: border-color .3s;
+}
+.ai-badge-inline {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  margin-left: 8px;
+  font-weight: 500;
+}
+.streaming-cursor {
+  animation: blink 1s step-end infinite;
+  color: var(--primary);
+  margin-left: 4px;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.record-ai-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.btn--ai {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.btn--ai:disabled { opacity: .5; cursor: not-allowed; }
+.btn--ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn--ghost:disabled { opacity: .4; cursor: not-allowed; }
+
+/* C3: Diagnosis styles */
+.diagnosis-suggestions {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  border-left: 4px solid var(--primary);
+}
+.suggestion-title { margin: 0 0 12px; font-size: 14px; }
+.diagnosis-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.diagnosis-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.diagnosis-tag__confidence {
+  font-size: 11px;
+  opacity: .7;
+}
+.diagnosis-tag__adopt {
+  border: none;
+  background: rgba(0,0,0,.08);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.exam-checklist {
+  margin-top: 14px;
+}
+.exam-checklist h5 { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.exam-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+/* C4: Review styles */
+.review-result { margin-top: 20px; }
+.review-risk-bar {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.risk--high { background: #f8d7da; color: #721c24; border-left: 4px solid var(--danger); }
+.risk--medium { background: #fff3cd; color: #856404; border-left: 4px solid var(--accent); }
+.risk--low { background: #d4edda; color: #155724; border-left: 4px solid var(--success); }
+.review-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.review-section--llm {
+  border-left: 4px solid var(--primary);
+  background: var(--primary-soft);
+}
+.review-section__title { margin: 0 0 10px; font-size: 14px; }
+.rule-hit {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: var(--bg);
+}
+.rule-hit__risk {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.rule-hit__risk[data-level="HIGH"],
+.rule-hit__risk[data-level="DANGER"],
+.rule-hit__risk[data-level="CRITICAL"] { background: #f8d7da; color: #721c24; }
+.rule-hit__risk[data-level="MEDIUM"],
+.rule-hit__risk[data-level="WARNING"] { background: #fff3cd; color: #856404; }
+.rule-hit__risk[data-level="LOW"],
+.rule-hit__risk[data-level="INFO"] { background: #d4edda; color: #155724; }
+.rule-hit__body p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.rule-hit__suggestion { color: var(--primary) !important; }
+.llm-summary { font-size: 14px; line-height: 1.6; margin: 0; }
+
+/* AI badge for review section */
+.ai-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  margin-left: 8px;
+  font-weight: 500;
+}
+</style>
