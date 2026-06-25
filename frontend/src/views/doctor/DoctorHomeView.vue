@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import {
-  ClipboardList,
-  BellRing,
-  RefreshCw,
+  LayoutDashboard,
   Stethoscope,
-  UserRound,
+  Clock,
+  CalendarDays,
+  RefreshCw,
 } from 'lucide-vue-next';
+import SideNav from '@/components/layout/SideNav.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
 
 import {
   beginConsultation,
@@ -35,10 +37,6 @@ import {
   submitPrescription,
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
-import DoctorConsultationPanel from '@/views/doctor/panels/DoctorConsultationPanel.vue';
-import DoctorHistoryPanel from '@/views/doctor/panels/DoctorHistoryPanel.vue';
-import DoctorOverviewPanel from '@/views/doctor/panels/DoctorOverviewPanel.vue';
-import DoctorSchedulePanel from '@/views/doctor/panels/DoctorSchedulePanel.vue';
 import type {
   AiUsageStats,
   ConsultationWorkspace,
@@ -137,27 +135,6 @@ const selectedRegistration = computed<RegistrationSummary | null>(() => {
 const overviewTone = computed(() => (error.value ? 'danger' : loading.value ? 'loading' : 'healthy'));
 const workspaceTone = computed(() => (workspaceLoading.value ? 'loading' : workspace.value ? 'healthy' : 'neutral'));
 const unreadNotificationCount = computed(() => notifications.value.filter((item) => item.read !== true).length);
-const doctorPanels = [
-  { id: 'overview', label: '总览' },
-  { id: 'consultation', label: '接诊' },
-  { id: 'history', label: '历史' },
-  { id: 'schedule', label: '排班' },
-] as const;
-
-const activeDoctorPanel = ref<(typeof doctorPanels)[number]['id']>('overview');
-const doctorPanelComponent = computed(() => {
-  switch (activeDoctorPanel.value) {
-    case 'consultation':
-      return DoctorConsultationPanel;
-    case 'history':
-      return DoctorHistoryPanel;
-    case 'schedule':
-      return DoctorSchedulePanel;
-    default:
-      return DoctorOverviewPanel;
-  }
-});
-
 const filteredPrescriptions = computed(() => {
   const keyword = drugSearch.value.trim().toLowerCase();
   if (!keyword) {
@@ -222,8 +199,6 @@ const doctorWorkspace = reactive({
   overviewTone,
   workspaceTone,
   unreadNotificationCount,
-  doctorPanels,
-  activeDoctorPanel,
   filteredPrescriptions,
   formatDateTime,
   formatDate,
@@ -258,9 +233,6 @@ const doctorWorkspace = reactive({
   submitCurrentPrescription,
   ackNotification,
   completeSelectedConsultation,
-  setActiveDoctorPanel: (panel: (typeof doctorPanels)[number]['id']) => {
-    activeDoctorPanel.value = panel;
-  },
 });
 
 function createEmptyItem(): PrescriptionDraftItem {
@@ -846,62 +818,41 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page">
-    <div class="band workspace-shell">
-      <div class="band-header">
-        <div>
-          <h2 class="band-title">医生工作台</h2>
-          <p class="band-copy">接诊、病历、审方和历史都收在一个工作区里，切换时不再堆在同一屏。</p>
-        </div>
-        <span class="status-chip" :data-tone="overviewTone">
-          <span class="chip-dot" />
-          <span>{{ doctor?.name || authStore.sessionLabel }}</span>
-        </span>
-      </div>
+  <div class="flex flex-1 min-h-0">
+    <SideNav
+      title="医生工作台"
+      :subtitle="doctor?.name || authStore.sessionLabel"
+      :items="[
+        { id: 'overview', label: '总览', path: '/doctor/overview', icon: LayoutDashboard },
+        { id: 'consultation', label: '接诊', path: '/doctor/consultation', icon: Stethoscope },
+        { id: 'history', label: '历史', path: '/doctor/history', icon: Clock },
+        { id: 'schedule', label: '排班', path: '/doctor/schedule', icon: CalendarDays },
+      ]"
+    />
 
-      <div class="toolbar workspace-topline">
-        <span class="pill">
-          <Stethoscope :size="14" />
-          <span>{{ doctor?.departmentName || '未分科' }}</span>
-        </span>
-        <span class="pill" :data-tone="workspaceTone">
-          <ClipboardList :size="14" />
-          <span>{{ workspaceLoading ? '工作区加载中' : workspace ? '工作区已就绪' : '未打开工作区' }}</span>
-        </span>
-        <span class="pill">
-          <UserRound :size="14" />
-          <span>{{ selectedRegistration?.patientName || '未选中接诊' }}</span>
-        </span>
-        <span class="pill" :data-tone="selectedRegistration?.status === 'WAITING' ? 'loading' : 'healthy'">
-          <ClipboardList :size="14" />
-          <span>{{ selectedRegistration?.status || '空闲' }}</span>
-        </span>
-        <span class="pill" :data-tone="notificationSocketState === 'connected' ? 'healthy' : 'loading'">
-          <BellRing :size="14" />
-          <span>WS {{ notificationSocketState }}</span>
-        </span>
-        <button class="button-ghost" type="button" @click="refreshAll" :disabled="loading">
-          <RefreshCw :size="16" :class="{ spinning: loading }" />
-          <span>刷新</span>
+    <div class="flex-1 overflow-y-auto p-6">
+      <p v-if="error" class="mb-4 p-3 rounded-md bg-red-50 text-danger text-sm">{{ error }}</p>
+
+      <!-- Topline stats -->
+      <div class="flex items-center gap-3 mb-6 flex-wrap">
+        <StatusChip :tone="selectedRegistration?.status === 'WAITING' ? 'info' : 'success'">
+          {{ selectedRegistration?.patientName || '未选中患者' }}
+        </StatusChip>
+        <StatusChip :tone="notificationSocketState === 'connected' ? 'success' : 'neutral'" :dot="true">
+          通知 {{ notificationSocketState === 'connected' ? '已连接' : '未连接' }}
+        </StatusChip>
+        <span class="flex-1" />
+        <button class="btn-ghost" type="button" @click="refreshAll" :disabled="loading">
+          <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
+          <span>{{ loading ? '加载中' : '刷新' }}</span>
         </button>
       </div>
 
-      <p class="auth-error" v-if="error">{{ error }}</p>
-
-      <div class="segmented workspace-tabs">
-        <button
-          v-for="panel in doctorPanels"
-          :key="panel.id"
-          type="button"
-          class="segment"
-          :class="{ active: activeDoctorPanel === panel.id }"
-          @click="activeDoctorPanel = panel.id"
-        >
-          <span>{{ panel.label }}</span>
-        </button>
-      </div>
-
-      <component :is="doctorPanelComponent" :workspace="doctorWorkspace" />
+      <RouterView v-slot="{ Component: PanelComp }">
+        <Suspense>
+          <component :is="PanelComp" :workspace="doctorWorkspace" v-if="PanelComp" />
+        </Suspense>
+      </RouterView>
     </div>
-  </section>
+  </div>
 </template>

@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
-  BellRing,
-  CirclePlus,
+  LayoutDashboard,
+  Building2,
+  Layers,
+  Settings,
+  ShieldCheck,
   RefreshCw,
 } from 'lucide-vue-next';
+import SideNav from '@/components/layout/SideNav.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
 
 import {
   adminListDepartments,
@@ -47,12 +52,6 @@ import {
   markNotificationRead,
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
-import AdminAuditPanel from '@/views/admin/panels/AdminAuditPanel.vue';
-import AdminConfigPanel from '@/views/admin/panels/AdminConfigPanel.vue';
-import AdminEditorPanel from '@/views/admin/panels/AdminEditorPanel.vue';
-import AdminMasterPanel from '@/views/admin/panels/AdminMasterPanel.vue';
-import AdminOverviewPanel from '@/views/admin/panels/AdminOverviewPanel.vue';
-import AdminResourcesPanel from '@/views/admin/panels/AdminResourcesPanel.vue';
 import type {
   AiCallRecordSummary,
   AiConfigSummary,
@@ -213,30 +212,6 @@ const visibleSchedules = computed(() =>
       (doctorFilter.value === null || item.doctorId === doctorFilter.value);
   }),
 );
-const adminPanels = [
-  { id: 'overview', label: '总览' },
-  { id: 'master', label: '基础资料' },
-  { id: 'resources', label: '排班 / 药品' },
-  { id: 'config', label: '规则配置' },
-  { id: 'audit', label: '审计记录' },
-] as const;
-
-const activeAdminPanel = ref<(typeof adminPanels)[number]['id']>('overview');
-const adminPanelComponent = computed(() => {
-  switch (activeAdminPanel.value) {
-    case 'master':
-      return AdminMasterPanel;
-    case 'resources':
-      return AdminResourcesPanel;
-    case 'config':
-      return AdminConfigPanel;
-    case 'audit':
-      return AdminAuditPanel;
-    default:
-      return AdminOverviewPanel;
-  }
-});
-
 const adminWorkspace = reactive({
   authStore,
   loading,
@@ -278,8 +253,6 @@ const adminWorkspace = reactive({
   selectedDepartment,
   selectedDoctor,
   visibleSchedules,
-  adminPanels,
-  activeAdminPanel,
   formatDateTime,
   formatStatus,
   truncate,
@@ -303,9 +276,6 @@ const adminWorkspace = reactive({
   selectRule,
   selectAi,
   selectPrompt,
-  setActiveAdminPanel: (panel: (typeof adminPanels)[number]['id']) => {
-    activeAdminPanel.value = panel;
-  },
 });
 
 function formatDateTime(value: string | null | undefined) {
@@ -799,97 +769,38 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page">
-    <div class="band workspace-shell">
-      <div class="band-header">
-        <div>
-          <h2 class="band-title">管理工作台</h2>
-          <p class="band-copy">基础数据、排班、配置和审计分区展示，维护时更像后台，不再像大杂烩单页。</p>
-        </div>
-        <span class="status-chip" :data-tone="activeTone">
-          <span class="chip-dot" />
-          <span>{{ authStore.sessionLabel }}</span>
-        </span>
-      </div>
+  <div class="flex flex-1 min-h-0">
+    <SideNav
+      title="管理工作台"
+      :subtitle="authStore.sessionLabel"
+      :items="[
+        { id: 'overview', label: '总览', path: '/admin/overview', icon: LayoutDashboard },
+        { id: 'master', label: '基础数据', path: '/admin/master-data', icon: Building2 },
+        { id: 'resources', label: '排班与资源', path: '/admin/resources', icon: Layers },
+        { id: 'config', label: '配置', path: '/admin/config', icon: Settings },
+        { id: 'audit', label: '审计', path: '/admin/audit', icon: ShieldCheck },
+      ]"
+    />
 
-      <div class="toolbar workspace-topline">
-        <span class="pill" :data-tone="notificationSocketState === 'connected' ? 'healthy' : 'loading'">
-          <BellRing :size="14" />
-          <span>WS {{ notificationSocketState }}</span>
-        </span>
-        <button class="button-ghost" type="button" @click="loadAll" :disabled="loading">
-          <RefreshCw :size="16" :class="{ spinning: loading }" />
-          <span>刷新</span>
-        </button>
-        <button class="button-secondary" type="button" @click="createNew('department')">
-          <CirclePlus :size="16" />
-          <span>新建科室</span>
-        </button>
-        <button class="button-secondary" type="button" @click="createNew('doctor')">
-          <CirclePlus :size="16" />
-          <span>新建医生</span>
-        </button>
-        <button class="button-secondary" type="button" @click="createNew('schedule')">
-          <CirclePlus :size="16" />
-          <span>新建排班</span>
-        </button>
-        <button class="button-secondary" type="button" @click="createNew('drug')">
-          <CirclePlus :size="16" />
-          <span>新建药品</span>
+    <div class="flex-1 overflow-y-auto p-6">
+      <p v-if="error" class="mb-4 p-3 rounded-md bg-red-50 text-danger text-sm">{{ error }}</p>
+
+      <div class="flex items-center gap-3 mb-6 flex-wrap">
+        <StatusChip :tone="notificationSocketState === 'connected' ? 'success' : 'neutral'" :dot="true">
+          通知 {{ notificationSocketState === 'connected' ? '已连接' : '未连接' }}
+        </StatusChip>
+        <span class="flex-1" />
+        <button class="btn-ghost" type="button" @click="loadAll" :disabled="loading">
+          <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
+          <span>{{ loading ? '加载中' : '刷新' }}</span>
         </button>
       </div>
 
-      <div class="field-grid" style="margin-top: 0.75rem;">
-        <label class="field">
-          <span>科室筛选</span>
-          <select v-model="departmentFilter">
-            <option :value="null">全部科室</option>
-            <option v-for="department in departments" :key="department.id" :value="department.id">
-              {{ department.name }}
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span>医生筛选</span>
-          <select v-model="doctorFilter">
-            <option :value="null">全部医生</option>
-            <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">
-              {{ doctor.name }}
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span>药品关键词</span>
-          <input v-model="drugKeyword" placeholder="按药品名或拼音筛选" />
-        </label>
-        <div class="action-row" style="align-self: end;">
-          <button class="button-secondary" type="button" @click="loadAll" :disabled="loading">
-            <RefreshCw :size="16" :class="{ spinning: loading }" />
-            <span>应用筛选</span>
-          </button>
-          <button class="button-ghost" type="button" @click="clearFilters">
-            <span>清空</span>
-          </button>
-        </div>
-      </div>
-
-      <p class="auth-error" v-if="error">{{ error }}</p>
-
-      <div class="segmented workspace-tabs">
-        <button
-          v-for="panel in adminPanels"
-          :key="panel.id"
-          type="button"
-          class="segment"
-          :class="{ active: activeAdminPanel === panel.id }"
-          @click="activeAdminPanel = panel.id"
-        >
-          <span>{{ panel.label }}</span>
-        </button>
-      </div>
-
-      <component :is="adminPanelComponent" :workspace="adminWorkspace" />
-      <AdminEditorPanel :workspace="adminWorkspace" v-show="activeAdminPanel !== 'overview'" />
+      <RouterView v-slot="{ Component: PanelComp }">
+        <Suspense>
+          <component :is="PanelComp" :workspace="adminWorkspace" v-if="PanelComp" />
+        </Suspense>
+      </RouterView>
     </div>
-  </section>
+  </div>
 </template>
