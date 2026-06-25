@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { CalendarDays, FileText, RefreshCw, Stethoscope, Ticket, UserRound } from 'lucide-vue-next';
+import { CalendarDays, FileText, ScanSearch, Ticket, UserRound } from 'lucide-vue-next';
 
 import {
   cancelRegistration,
@@ -31,15 +31,18 @@ import type {
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
 import { resolveUiErrorMessage } from '@/utils/zh';
-import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
-import PatientHistoryPanel from '@/views/patient/panels/PatientHistoryPanel.vue';
-import PatientOverviewPanel from '@/views/patient/panels/PatientOverviewPanel.vue';
-import PatientProfilePanel from '@/views/patient/panels/PatientProfilePanel.vue';
-import PatientRecordsPanel from '@/views/patient/panels/PatientRecordsPanel.vue';
-import PatientRegistrationPanel from '@/views/patient/panels/PatientRegistrationPanel.vue';
-import PatientTriagePanel from '@/views/patient/panels/PatientTriagePanel.vue';
+import PhoneFrame from '@/components/layout/PhoneFrame.vue';
+import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
 
 const authStore = useAuthStore();
+
+const tabs = [
+  { id: 'overview', label: '概览', icon: CalendarDays, path: '/patient/overview' },
+  { id: 'triage', label: '分诊', icon: ScanSearch, path: '/patient/triage' },
+  { id: 'registration', label: '挂号', icon: Ticket, path: '/patient/registration' },
+  { id: 'records', label: '病历', icon: FileText, path: '/patient/records' },
+  { id: 'profile', label: '我的', icon: UserRound, path: '/patient/profile' },
+] as const;
 
 const loading = ref(false);
 const triaging = ref(false);
@@ -94,33 +97,6 @@ const latestRegistration = computed(() => registrations.value[0] ?? null);
 const latestTriage = computed(() => triageHistory.value[0] ?? triageResult.value);
 const activeTone = computed(() => (error.value ? 'danger' : loading.value ? 'loading' : 'healthy'));
 const displayName = computed(() => patient.value?.realName || patient.value?.username || authStore.sessionLabel);
-
-const patientPanels = [
-  { id: 'overview', label: '总览' },
-  { id: 'triage', label: '分诊' },
-  { id: 'registration', label: '挂号' },
-  { id: 'records', label: '病历' },
-  { id: 'profile', label: '资料' },
-  { id: 'history', label: '历史' },
-] as const;
-
-const activePatientPanel = ref<(typeof patientPanels)[number]['id']>('overview');
-const patientPanelComponent = computed(() => {
-  switch (activePatientPanel.value) {
-    case 'triage':
-      return PatientTriagePanel;
-    case 'registration':
-      return PatientRegistrationPanel;
-    case 'records':
-      return PatientRecordsPanel;
-    case 'profile':
-      return PatientProfilePanel;
-    case 'history':
-      return PatientHistoryPanel;
-    default:
-      return PatientOverviewPanel;
-  }
-});
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
@@ -397,9 +373,6 @@ const workspace = reactive({
   latestTriage,
   activeTone,
   displayName,
-  setActivePatientPanel: (panel: (typeof patientPanels)[number]['id']) => {
-    activePatientPanel.value = panel;
-  },
   chooseDepartment,
   chooseDoctor,
   chooseSchedule,
@@ -419,63 +392,33 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="page patient-page">
-    <div class="band workspace-shell">
-      <div class="band-header">
-        <div>
-          <h2 class="band-title">患者工作区</h2>
-          <p class="band-copy">分诊、挂号、病历、资料和历史分区展示，手机端也能顺着流程操作。</p>
-        </div>
-        <span class="status-chip" :data-tone="activeTone">
-          <span class="chip-dot" />
-          <span>{{ displayName }}</span>
-        </span>
+  <PhoneFrame>
+    <div class="flex flex-col h-full">
+      <div class="flex-1 overflow-y-auto">
+        <p v-if="error" class="mx-4 mt-3 p-2.5 rounded-md bg-red-50 text-danger text-xs">{{ error }}</p>
+
+        <RouterView v-slot="{ Component: PanelComp }">
+          <Suspense>
+            <component :is="PanelComp" :workspace="workspace" v-if="PanelComp" />
+          </Suspense>
+        </RouterView>
+
+        <LoadingSkeleton v-if="loading" :rows="3" class="p-4" />
       </div>
 
-      <div class="toolbar workspace-topline">
-        <span class="pill" :data-tone="triageResult ? 'healthy' : 'loading'">
-          <FileText :size="14" />
-          <span>{{ triageResult ? '已分诊' : '待分诊' }}</span>
-        </span>
-        <span class="pill">
-          <Stethoscope :size="14" />
-          <span>{{ triageResult?.recommendedDoctors.length ?? 0 }} 位推荐医生</span>
-        </span>
-        <span class="pill">
-          <Ticket :size="14" />
-          <span>{{ waitingRegistrations.length }} 个待处理挂号</span>
-        </span>
-        <span class="pill">
-          <CalendarDays :size="14" />
-          <span>{{ completedRegistrations.length }} 个已完成就诊</span>
-        </span>
-        <span class="pill">
-          <UserRound :size="14" />
-          <span>{{ patient?.patientId ?? authStore.patientId ?? '未知患者' }}</span>
-        </span>
-        <button class="button-ghost" type="button" @click="refreshAll" :disabled="loading">
-          <RefreshCw :size="16" :class="{ spinning: loading }" />
-          <span>刷新</span>
-        </button>
-      </div>
-
-      <p class="auth-error" v-if="error">{{ error }}</p>
-
-      <div class="segmented workspace-tabs">
-        <button
-          v-for="panel in patientPanels"
-          :key="panel.id"
-          type="button"
-          class="segment"
-          :class="{ active: activePatientPanel === panel.id }"
-          @click="activePatientPanel = panel.id"
+      <!-- Bottom tab bar -->
+      <div class="shrink-0 bg-white border-t border-border flex">
+        <RouterLink
+          v-for="tab in tabs"
+          :key="tab.id"
+          :to="tab.path"
+          class="flex-1 flex flex-col items-center gap-0.5 py-2 text-xs transition no-underline"
+          :class="$route.path.startsWith(tab.path) ? 'text-brand' : 'text-text-secondary'"
         >
-          <span>{{ panel.label }}</span>
-        </button>
+          <component :is="tab.icon" :size="18" />
+          <span>{{ tab.label }}</span>
+        </RouterLink>
       </div>
-
-      <component :is="patientPanelComponent" :workspace="workspace" />
     </div>
-    <AiChatLauncher role="patient" />
-  </section>
+  </PhoneFrame>
 </template>

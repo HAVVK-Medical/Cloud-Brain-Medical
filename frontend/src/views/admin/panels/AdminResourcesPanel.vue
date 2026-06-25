@@ -1,50 +1,38 @@
 <script setup lang="ts">
-import { ArrowDownUp, Copy } from 'lucide-vue-next';
+import { Plus } from 'lucide-vue-next';
+import SectionCard from '@/components/shared/SectionCard.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
+import EmptyState from '@/components/shared/EmptyState.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
 </script>
 
 <template>
-  <section class="section workspace-panel">
-    <div class="section-head">
-      <div>
-        <h3 class="section-title">排班 / 药品</h3>
-        <p class="section-copy">医生排班和药品库是挂号与开方的前置数据。</p>
-      </div>
-      <div class="action-row">
-        <button class="button-secondary" type="button" @click="workspace.createNew('schedule')"><ArrowDownUp :size="16" /><span>新排班</span></button>
-        <button class="button-secondary" type="button" @click="workspace.createNew('drug')"><Copy :size="16" /><span>新药品</span></button>
-      </div>
+  <SectionCard title="排班列表">
+    <div class="flex gap-2 mb-4">
+      <button class="btn-secondary" type="button" @click="workspace.createNew('schedule')"><Plus :size="16" /><span>新增排班</span></button>
     </div>
-
-    <div class="detail-grid two">
-      <ul class="mini-list overflow-list">
-        <li v-for="schedule in workspace.visibleSchedules" :key="schedule.id" class="mini-item" @click="workspace.selectSchedule(schedule)">
-          <div class="mini-item-head">
-            <div class="mini-item-title">{{ schedule.workDate }} · {{ schedule.period }}</div>
-            <span class="pill">{{ schedule.remainingSlots ?? 0 }}/{{ schedule.totalSlots ?? 0 }}</span>
-          </div>
-          <div class="mini-item-meta">
-            <span>{{ schedule.departmentName || '未分科' }}</span>
-            <span>{{ schedule.doctorName || '未知医生' }}</span>
-            <span>{{ workspace.formatStatus(schedule.status) }}</span>
-          </div>
-        </li>
-      </ul>
-
-      <ul class="mini-list overflow-list">
-        <li v-for="drug in workspace.drugs" :key="drug.id" class="mini-item" @click="workspace.selectDrug(drug)">
-          <div class="mini-item-head">
-            <div class="mini-item-title">{{ drug.name }}</div>
-            <span class="pill">{{ drug.code }}</span>
-          </div>
-          <div class="mini-item-meta">
-            <span>{{ drug.specification || '无规格' }}</span>
-            <span>{{ drug.dosageForm || '无剂型' }}</span>
-            <span>{{ workspace.formatStatus(drug.status) }}</span>
-          </div>
-        </li>
-      </ul>
+    <div v-if="workspace.visibleSchedules.length" class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-border text-left text-text-secondary">
+          <th class="pb-2 font-medium">日期</th><th class="pb-2 font-medium">时段</th><th class="pb-2 font-medium">医生</th><th class="pb-2 font-medium">科室</th><th class="pb-2 font-medium">号源</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
+        </tr></thead>
+        <tbody>
+          <tr v-for="item in workspace.visibleSchedules" :key="item.id" class="border-b border-border">
+            <td class="py-2.5 font-medium">{{ item.workDate }}</td>
+            <td class="py-2.5 text-text-secondary">{{ item.period }}</td>
+            <td class="py-2.5">{{ item.doctorName }}</td>
+            <td class="py-2.5 text-text-secondary">{{ item.departmentName }}</td>
+            <td class="py-2.5">{{ item.remainingSlots }}/{{ item.totalSlots }}</td>
+            <td class="py-2.5"><StatusChip :tone="item.status === 'ACTIVE' ? 'success' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</StatusChip></td>
+            <td class="py-2.5"><div class="flex gap-1">
+              <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.selectSchedule(item)">编辑</button>
+              <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'schedule'; workspace.currentId = item.id; workspace.toggleCurrent()" :disabled="workspace.saving">切换</button>
+            </div></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-  </section>
+    <EmptyState v-else icon="calendar" title="暂无排班" />
+  </SectionCard>
 </template>

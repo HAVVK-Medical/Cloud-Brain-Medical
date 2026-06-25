@@ -1,77 +1,63 @@
 <script setup lang="ts">
+import { ref } from 'vue';
+import SectionCard from '@/components/shared/SectionCard.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
+import EmptyState from '@/components/shared/EmptyState.vue';
+
+const auditTabs = [
+  { id: 'ai' as const, label: 'AI调用记录' },
+  { id: 'audit' as const, label: '审计日志' },
+];
+const activeAuditTab = ref<typeof auditTabs[number]['id']>('ai');
+
 const { workspace } = defineProps<{ workspace: any }>();
 </script>
 
 <template>
-  <section class="section workspace-panel">
-    <div class="section-head">
-      <div>
-        <h3 class="section-title">审计记录</h3>
-        <p class="section-copy">AI 调用、审计日志和当前上下文集中展示。</p>
-      </div>
+  <div class="space-y-6">
+    <div class="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+      <button v-for="tab in auditTabs" :key="tab.id" type="button" class="px-4 py-1.5 rounded-md text-sm font-medium transition" :class="activeAuditTab === tab.id ? 'bg-white text-brand shadow-sm' : 'text-text-secondary hover:text-text-main'" @click="activeAuditTab = tab.id">
+        {{ tab.label }}
+      </button>
     </div>
 
-    <div class="detail-grid two">
-      <section class="section subtle-section">
-        <div class="section-head">
-          <div>
-            <h4 class="section-title">AI 调用</h4>
-            <p class="section-copy">最近几条调用记录。</p>
-          </div>
-        </div>
-
-        <div class="mini-list overflow-list">
-          <div class="mini-item" v-for="record in workspace.aiRecords.slice(0, 6)" :key="record.id">
-            <div class="mini-item-head">
-              <div class="mini-item-title">{{ record.taskType }}</div>
-              <span class="pill">{{ record.callStatus }}</span>
-            </div>
-            <div class="mini-item-meta">
-              <span>{{ record.provider || 'LOCAL' }}</span>
-              <span>{{ record.operatorRole || 'unknown' }}</span>
-              <span>{{ workspace.formatDateTime(record.createdAt) }}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section subtle-section">
-        <div class="section-head">
-          <div>
-            <h4 class="section-title">审计日志</h4>
-            <p class="section-copy">追溯操作链路和结果。</p>
-          </div>
-        </div>
-
-        <div class="mini-list overflow-list">
-          <div class="mini-item" v-for="audit in workspace.auditLogs.slice(0, 6)" :key="audit.id">
-            <div class="mini-item-head">
-              <div class="mini-item-title">{{ audit.action }}</div>
-              <span class="pill" :data-tone="audit.success ? 'healthy' : 'danger'">{{ audit.success ? '成功' : '失败' }}</span>
-            </div>
-            <div class="mini-item-meta">
-              <span>{{ audit.actorRole || 'unknown' }}</span>
-              <span>{{ audit.resourceType || 'NO_RESOURCE' }}</span>
-              <span>{{ workspace.formatDateTime(audit.occurredAt) }}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <div class="mini-list">
-      <div class="mini-item">
-        <span class="label">当前资源</span>
-        <span class="value">{{ workspace.currentKind }} {{ workspace.currentId ? `#${workspace.currentId}` : '新建' }}</span>
+    <SectionCard v-if="activeAuditTab === 'ai'" title="AI调用记录">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="border-b border-border text-left text-text-secondary">
+            <th class="pb-2 font-medium">时间</th><th class="pb-2 font-medium">类型</th><th class="pb-2 font-medium">提供方</th><th class="pb-2 font-medium">耗时</th><th class="pb-2 font-medium">状态</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="item in workspace.aiRecords" :key="item.id" class="border-b border-border">
+              <td class="py-2.5 text-text-secondary">{{ workspace.formatDateTime(item.createdAt) }}</td>
+              <td class="py-2.5 font-medium">{{ item.taskType }}</td>
+              <td class="py-2.5 text-text-secondary">{{ item.provider ?? '-' }}</td>
+              <td class="py-2.5 text-text-secondary">{{ item.durationMs ? item.durationMs + 'ms' : '-' }}</td>
+              <td class="py-2.5"><StatusChip :tone="item.callStatus === 'SUCCESS' ? 'success' : 'danger'">{{ item.callStatus }}</StatusChip></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <div class="mini-item">
-        <span class="label">科室筛选</span>
-        <span class="value">{{ workspace.selectedDepartment?.name || '全部科室' }}</span>
+      <EmptyState v-if="!workspace.aiRecords.length" icon="search" title="暂无AI调用记录" />
+    </SectionCard>
+
+    <SectionCard v-if="activeAuditTab === 'audit'" title="审计日志">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="border-b border-border text-left text-text-secondary">
+            <th class="pb-2 font-medium">时间</th><th class="pb-2 font-medium">操作人</th><th class="pb-2 font-medium">操作</th><th class="pb-2 font-medium">资源</th><th class="pb-2 font-medium">结果</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="item in workspace.auditLogs" :key="item.id" class="border-b border-border">
+              <td class="py-2.5 text-text-secondary">{{ workspace.formatDateTime(item.occurredAt) }}</td>
+              <td class="py-2.5 font-medium">{{ item.actorRole }}/{{ item.actorId }}</td>
+              <td class="py-2.5 text-text-secondary">{{ item.action }}</td>
+              <td class="py-2.5 text-text-secondary">{{ item.resourceType }}{{ item.resourceId ? '/' + item.resourceId : '' }}</td>
+              <td class="py-2.5"><StatusChip :tone="item.success ? 'success' : 'danger'">{{ item.success ? '成功' : '失败' }}</StatusChip></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <div class="mini-item">
-        <span class="label">医生筛选</span>
-        <span class="value">{{ workspace.selectedDoctor?.name || '全部医生' }}</span>
-      </div>
-    </div>
-  </section>
+    </SectionCard>
+  </div>
 </template>

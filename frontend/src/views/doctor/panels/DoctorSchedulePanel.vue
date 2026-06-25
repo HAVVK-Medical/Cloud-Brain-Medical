@@ -1,27 +1,27 @@
 <script setup lang="ts">
+import SectionCard from '@/components/shared/SectionCard.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
+import EmptyState from '@/components/shared/EmptyState.vue';
+
 const { workspace } = defineProps<{ workspace: any }>();
 </script>
 
 <template>
-  <section class="section workspace-panel">
-    <div class="section-head">
-      <div>
-        <h3 class="section-title">排班信息</h3>
-        <p class="section-copy">查看本人的可用排班和号源。</p>
+  <SectionCard title="我的排班">
+    <div v-if="workspace.schedules.length" class="space-y-2">
+      <div v-for="slot in workspace.schedules" :key="slot.id" class="flex items-center justify-between py-3 px-3 rounded-lg border border-border">
+        <div>
+          <p class="text-sm font-medium">{{ slot.workDate }} · {{ slot.period }}</p>
+          <p class="text-xs text-text-secondary">{{ slot.departmentName }} · {{ slot.visitLevel }}</p>
+        </div>
+        <div class="text-right">
+          <p class="text-sm font-medium">{{ slot.remainingSlots }}/{{ slot.totalSlots }}</p>
+          <StatusChip :tone="slot.remainingSlots && slot.remainingSlots > 0 ? 'success' : 'danger'">
+            {{ slot.remainingSlots && slot.remainingSlots > 0 ? '有余号' : '已约满' }}
+          </StatusChip>
+        </div>
       </div>
     </div>
-
-    <ul class="mini-list overflow-list">
-      <li v-for="schedule in workspace.schedules" :key="schedule.id" class="mini-item">
-        <div class="mini-item-head">
-          <div class="mini-item-title">{{ workspace.formatDate(schedule.workDate) }} / {{ schedule.period }}</div>
-          <span class="pill">{{ schedule.remainingSlots ?? 0 }}/{{ schedule.totalSlots ?? 0 }}</span>
-        </div>
-        <div class="mini-item-meta">
-          <span>{{ schedule.departmentName || '未分科' }}</span>
-          <span>{{ schedule.visitLevel || '普通门诊' }}</span>
-        </div>
-      </li>
-    </ul>
-  </section>
+    <EmptyState v-else icon="calendar" title="暂无排班" description="暂无当前排班数据" />
+  </SectionCard>
 </template>
