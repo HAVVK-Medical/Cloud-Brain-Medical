@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class DeepSeekProvider extends AbstractOpenAICompatibleProvider {
 
-    private static final String DEFAULT_API_URL = "https://api.deepseek.com/v1";
+    private static final String DEFAULT_API_URL = "https://api.deepseek.com";
 
     public DeepSeekProvider(ObjectMapper objectMapper) {
         super("DEEPSEEK", DEFAULT_API_URL, objectMapper);
