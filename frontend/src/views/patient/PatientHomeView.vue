@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { CalendarDays, FileText, ScanSearch, Ticket, UserRound } from 'lucide-vue-next';
+import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
 
 import {
   cancelRegistration,
@@ -421,4 +422,5 @@ onMounted(() => {
       </div>
     </div>
   </PhoneFrame>
+  <AiChatLauncher role="patient" />
 </template>

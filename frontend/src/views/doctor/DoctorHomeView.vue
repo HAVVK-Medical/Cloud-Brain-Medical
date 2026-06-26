@@ -9,6 +9,7 @@ import {
 } from 'lucide-vue-next';
 import SideNav from '@/components/layout/SideNav.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
+import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
 
 import {
   beginConsultation,
@@ -855,4 +856,5 @@ onBeforeUnmount(() => {
       </RouterView>
     </div>
   </div>
+  <AiChatLauncher role="doctor" />
 </template>

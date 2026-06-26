@@ -6,6 +6,71 @@ import EmptyState from '@/components/shared/EmptyState.vue';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
+
+interface DiagnosisEntry { name: string; confidence: number }
+interface RuleHitEntry { ruleName?: string; alertMessage?: string; suggestion?: string; riskLevel?: string }
+
+function parseDiagnoses(text: string): DiagnosisEntry[] {
+  if (!text) return [];
+  return text.split('\n').filter(Boolean).map(line => {
+    const match = line.match(/^(.+?)\s*(\d{1,3})%?\s*$/);
+    if (match) return { name: match[1].trim(), confidence: parseInt(match[2]) };
+    return { name: line.replace(/^[-*\d.]+\s*/, '').trim(), confidence: 0 };
+  });
+}
+
+function parseExamItems(text: string): string[] {
+  if (!text) return [];
+  return text.split('\n').filter(Boolean).map(line => line.replace(/^[-*\d.]+\s*/, '').trim());
+}
+
+function confidenceBg(conf: number): string {
+  if (conf >= 75) return '#d4edda';
+  if (conf >= 50) return '#fff3cd';
+  return '#f8f0ff';
+}
+
+function confidenceFg(conf: number): string {
+  if (conf >= 75) return '#155724';
+  if (conf >= 50) return '#856404';
+  return '#6f42c1';
+}
+
+function adoptDiagnosis(name: string) {
+  workspace.recordForm.preliminaryDiagnosis = name;
+}
+
+function parseRuleHits(raw: string | Record<string, unknown>[]): RuleHitEntry[] {
+  if (Array.isArray(raw)) return raw as RuleHitEntry[];
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as RuleHitEntry[]; } catch { return []; }
+  }
+  return [];
+}
+
+function riskLabel(level: string | null | undefined): string {
+  switch ((level || '').toUpperCase()) {
+    case 'HIGH': case 'DANGER': case 'CRITICAL': return '高风险';
+    case 'MEDIUM': case 'WARNING': return '中风险';
+    default: return '低风险';
+  }
+}
+
+function riskBarClass(level: string | null | undefined): string {
+  switch ((level || '').toUpperCase()) {
+    case 'HIGH': case 'DANGER': case 'CRITICAL': return 'bg-red-50 text-danger border-l-2 border-danger';
+    case 'MEDIUM': case 'WARNING': return 'bg-yellow-50 text-warning border-l-2 border-warning';
+    default: return 'bg-green-50 text-success border-l-2 border-success';
+  }
+}
+
+function ruleRiskClass(level: string | null | undefined): string {
+  switch ((level || '').toUpperCase()) {
+    case 'HIGH': case 'DANGER': case 'CRITICAL': return 'bg-red-100 text-danger';
+    case 'MEDIUM': case 'WARNING': return 'bg-yellow-100 text-warning';
+    default: return 'bg-green-100 text-success';
+  }
+}
 </script>
 
 <template>
@@ -60,16 +125,54 @@ const { workspace } = defineProps<{ workspace: any }>();
           <!-- Medical record form -->
           <SectionCard title="病历草稿">
             <div class="grid grid-cols-2 gap-3">
-              <label class="label-text">主诉 <textarea v-model="workspace.recordForm.chiefComplaint" class="input-field h-16 resize-none mt-1" /></label>
-              <label class="label-text">现病史 <textarea v-model="workspace.recordForm.presentIllness" class="input-field h-16 resize-none mt-1" /></label>
-              <label class="label-text">既往史 <textarea v-model="workspace.recordForm.pastHistory" class="input-field h-16 resize-none mt-1" /></label>
-              <label class="label-text">体格检查 <textarea v-model="workspace.recordForm.physicalExam" class="input-field h-16 resize-none mt-1" /></label>
-              <label class="label-text col-span-2">初步诊断 <textarea v-model="workspace.recordForm.preliminaryDiagnosis" class="input-field h-16 resize-none mt-1" /></label>
-              <label class="label-text col-span-2">治疗方案 <textarea v-model="workspace.recordForm.treatmentPlan" class="input-field h-16 resize-none mt-1" /></label>
+              <label class="label-text" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+                主诉
+                <span v-if="workspace.generatingRecord" class="ai-cursor" />
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+                <textarea v-model="workspace.recordForm.chiefComplaint" class="input-field h-16 resize-none mt-1" />
+              </label>
+              <label class="label-text" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+                现病史
+                <span v-if="workspace.generatingRecord" class="ai-cursor" />
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+                <textarea v-model="workspace.recordForm.presentIllness" class="input-field h-16 resize-none mt-1" />
+              </label>
+              <label class="label-text" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+                既往史
+                <span v-if="workspace.generatingRecord" class="ai-cursor" />
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+                <textarea v-model="workspace.recordForm.pastHistory" class="input-field h-16 resize-none mt-1" />
+              </label>
+              <label class="label-text" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+                体格检查
+                <span v-if="workspace.generatingRecord" class="ai-cursor" />
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+                <textarea v-model="workspace.recordForm.physicalExam" class="input-field h-16 resize-none mt-1" />
+              </label>
+              <label class="label-text col-span-2" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+                初步诊断
+                <span v-if="workspace.generatingRecord" class="ai-cursor" />
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+                <textarea v-model="workspace.recordForm.preliminaryDiagnosis" class="input-field h-16 resize-none mt-1" />
+              </label>
+              <label class="label-text col-span-2" :class="{ 'ai-field--streaming': workspace.generatingRecord }">
+                治疗方案
+                <span v-if="workspace.generatingRecord" class="ai-cursor" />
+                <span v-else-if="workspace.recordForm.aiGenerated" class="ai-badge-inline">AI 生成</span>
+                <textarea v-model="workspace.recordForm.treatmentPlan" class="input-field h-16 resize-none mt-1" />
+              </label>
             </div>
-            <button class="btn-primary mt-3" type="button" @click="workspace.saveCurrentMedicalRecord()" :disabled="workspace.savingRecord">
-              {{ workspace.savingRecord ? '保存中...' : '保存病历' }}
-            </button>
+            <div class="flex gap-2 mt-3">
+              <button class="btn-primary" type="button" @click="workspace.saveCurrentMedicalRecord()" :disabled="workspace.savingRecord">
+                {{ workspace.savingRecord ? '保存中...' : '保存病历' }}
+              </button>
+              <button class="btn-ghost" type="button" @click="workspace.saveCurrentMedicalRecord()" :disabled="!workspace.recordForm.chiefComplaint">
+                采纳全部
+              </button>
+              <button class="btn-ghost" type="button" @click="workspace.generateDraftMedicalRecord()" :disabled="workspace.generatingRecord">
+                重新生成
+              </button>
+            </div>
           </SectionCard>
 
           <!-- Prescription -->
@@ -94,18 +197,59 @@ const { workspace } = defineProps<{ workspace: any }>();
             </div>
           </SectionCard>
 
+          <!-- Diagnosis suggestions -->
+          <SectionCard v-if="workspace.diagnosisSuggestion" title="AI 诊断建议">
+            <div class="space-y-3">
+              <div class="flex flex-wrap gap-2">
+                <span v-for="(diag, idx) in parseDiagnoses(workspace.diagnosisSuggestion.suggestedDiagnoses)" :key="idx"
+                      class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+                      :style="{ background: confidenceBg(diag.confidence), color: confidenceFg(diag.confidence) }">
+                  {{ diag.name }}
+                  <span v-if="diag.confidence" class="opacity-70">{{ diag.confidence }}%</span>
+                  <button class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-black/10 hover:bg-black/20" @click="adoptDiagnosis(diag.name)">采纳</button>
+                </span>
+              </div>
+              <div v-if="workspace.diagnosisSuggestion.suggestedExamItems" class="space-y-1">
+                <p class="text-xs font-medium text-text-secondary">建议检查项目</p>
+                <label v-for="(exam, idx) in parseExamItems(workspace.diagnosisSuggestion.suggestedExamItems)" :key="idx"
+                       class="flex items-center gap-2 text-sm py-1">
+                  <input type="checkbox" class="rounded" />
+                  <span>{{ exam }}</span>
+                </label>
+              </div>
+            </div>
+          </SectionCard>
+
           <!-- Review result -->
           <SectionCard v-if="workspace.reviewResult" title="审方结果">
-            <div class="space-y-2 text-sm">
-              <div class="flex items-center gap-2">
-                <span class="text-text-secondary">风险等级：</span>
-                <StatusChip :tone="workspace.reviewResult.riskLevel === 'HIGH' ? 'danger' : workspace.reviewResult.riskLevel === 'MEDIUM' ? 'warning' : 'success'">
-                  {{ workspace.reviewResult.riskLevel === 'HIGH' ? '高风险' : workspace.reviewResult.riskLevel === 'MEDIUM' ? '中风险' : '低风险' }}
-                </StatusChip>
-              </div>
-              <div v-if="workspace.reviewResult.localRuleHits" class="p-3 rounded-md bg-red-50 text-danger text-xs whitespace-pre-wrap">{{ workspace.reviewResult.localRuleHits }}</div>
-              <div v-if="workspace.reviewResult.llmSuggestion" class="p-3 rounded-md bg-blue-50 text-info text-xs whitespace-pre-wrap">{{ workspace.reviewResult.llmSuggestion }}</div>
+            <!-- Risk bar -->
+            <div class="px-4 py-2.5 rounded-lg font-semibold text-sm mb-3" :class="riskBarClass(workspace.reviewResult.riskLevel)">
+              风险等级：{{ workspace.reviewResult.riskLevel === 'HIGH' ? '高风险' : workspace.reviewResult.riskLevel === 'MEDIUM' ? '中风险' : '低风险' }}
             </div>
+
+            <!-- Local Rule Engine -->
+            <div v-if="workspace.reviewResult.localRuleHits" class="mb-3 p-3 rounded-lg bg-gray-50 border border-border">
+              <h4 class="text-sm font-medium mb-2">📋 本地规则引擎</h4>
+              <div v-for="(hit, idx) in parseRuleHits(workspace.reviewResult.localRuleHits)" :key="idx"
+                   class="flex gap-3 p-2 rounded-md bg-white mb-2 last:mb-0">
+                <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded font-semibold"
+                      :class="ruleRiskClass(hit.riskLevel)">
+                  {{ riskLabel(hit.riskLevel) }}
+                </span>
+                <div class="text-xs">
+                  <strong>{{ hit.ruleName || hit.alertMessage }}</strong>
+                  <p v-if="hit.alertMessage" class="text-text-secondary mt-0.5">{{ hit.alertMessage }}</p>
+                  <p v-if="hit.suggestion" class="text-brand mt-0.5">💡 {{ hit.suggestion }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- LLM Analysis -->
+            <div v-if="workspace.reviewResult.llmSuggestion" class="p-3 rounded-lg bg-brand-soft border-l-2 border-brand">
+              <h4 class="text-sm font-medium mb-1">🤖 AI 分析补充 <span class="ai-badge">AI 生成</span></h4>
+              <p class="text-xs text-text-secondary whitespace-pre-wrap">{{ workspace.reviewResult.llmSuggestion }}</p>
+            </div>
+
             <button class="btn-primary mt-3" type="button" @click="workspace.submitCurrentPrescription()" :disabled="workspace.submittingPrescription">
               {{ workspace.submittingPrescription ? '提交中...' : '确认提交处方' }}
             </button>
