@@ -209,6 +209,11 @@ function ruleRiskClass(level: string | null | undefined): string {
             </div>
           </SectionCard>
 
+          <!-- Degraded notice for medical record -->
+          <div v-if="workspace.recordDegraded" class="ai-degraded-notice mb-3">
+            ⚠️ AI 服务生成病历失败，当前显示的是本地规则生成的草稿，建议医生仔细核对。
+          </div>
+
           <!-- Medical record form -->
           <SectionCard title="病历草稿">
             <div class="grid grid-cols-2 gap-3">
@@ -283,6 +288,11 @@ function ruleRiskClass(level: string | null | undefined): string {
               </div>
             </div>
           </SectionCard>
+
+          <!-- Degraded notice for diagnosis -->
+          <div v-if="workspace.diagnosisDegraded" class="ai-degraded-notice mb-3">
+            ⚠️ AI 服务生成诊断建议失败，当前显示的是本地规则生成的建议，供医生参考。
+          </div>
 
           <!-- Diagnosis suggestions -->
           <SectionCard v-if="workspace.diagnosisSuggestion" title="AI 诊断建议">

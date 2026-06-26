@@ -26,7 +26,7 @@ WHERE NOT EXISTS (SELECT 1 FROM department WHERE code = 'dermatology');
 -- Password: doctor123 (BCrypt hash matches existing DatabaseSeeder)
 -- ============================================================
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor02', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '李心怡', (SELECT id FROM department WHERE code = 'cardiology'),
        '副主任医师', '冠心病、高血压、心律失常',
        '从事心血管内科临床工作15年，擅长冠心病介入治疗和高血压管理。',
@@ -34,7 +34,7 @@ SELECT 'doctor02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor02');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor03', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor03', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '王建华', (SELECT id FROM department WHERE code = 'neurology'),
        '主任医师', '头痛、癫痫、帕金森综合征',
        '神经内科主任医师，博士生导师，从事神经病学临床和科研工作30年，在癫痫和帕金森病诊疗方面有丰富经验。',
@@ -42,7 +42,7 @@ SELECT 'doctor03', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor03');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor04', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor04', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '陈思远', (SELECT id FROM department WHERE code = 'neurology'),
        '主治医师', '脑血管病、眩晕、失眠',
        '神经内科主治医师，专注于脑血管病的急性期治疗和二级预防，对眩晕和睡眠障碍诊疗有深入研究。',
@@ -50,7 +50,7 @@ SELECT 'doctor04', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor04');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor05', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor05', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '赵刚', (SELECT id FROM department WHERE code = 'orthopedics'),
        '副主任医师', '骨折创伤、关节置换',
        '骨科副主任医师，擅长四肢骨折微创治疗和髋膝关节置换术，年手术量超过500台。',
@@ -58,7 +58,7 @@ SELECT 'doctor05', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor05');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor06', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor06', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '刘磊', (SELECT id FROM department WHERE code = 'orthopedics'),
        '主治医师', '运动损伤、脊柱微创',
        '骨科主治医师，运动医学方向，擅长关节镜手术和脊柱微创治疗。曾担任省级运动队医疗保障医师。',
@@ -66,7 +66,7 @@ SELECT 'doctor06', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor06');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor07', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor07', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '孙丽华', (SELECT id FROM department WHERE code = 'dermatology'),
        '主任医师', '过敏性皮肤病、银屑病、痤疮',
        '皮肤科主任医师，从事皮肤科临床工作25年，在银屑病生物制剂治疗和疑难皮肤病诊断方面经验丰富。',
@@ -74,7 +74,7 @@ SELECT 'doctor07', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor07');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor08', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor08', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '周晓峰', (SELECT id FROM department WHERE code = 'dermatology'),
        '主治医师', '湿疹、荨麻疹、真菌感染',
        '皮肤科主治医师，专注于过敏性皮肤病的综合治疗和皮肤真菌病的规范化诊疗。',
@@ -86,122 +86,122 @@ WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor08');
 -- Password: patient123 (BCrypt hash matches existing DatabaseSeeder)
 -- ============================================================
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient02', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient02', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '王小明', '13800010002', 'MALE', '2018-03-15', 8, '无', '无', '110101201803150002', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient02');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient03', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient03', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '刘思琪', '13800010003', 'FEMALE', '2001-07-22', 25, '青霉素', '无', '320501200107220003', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient03');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient04', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient04', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '陈建国', '13800010004', 'MALE', '1968-11-03', 58, '无', '高血压10年，规律服用降压药', '440103196811030004', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient04');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient05', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient05', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '张秀兰', '13800010005', 'FEMALE', '1959-05-18', 67, '磺胺类', '糖尿病15年、冠心病，口服二甲双胍和阿托伐他汀', '330102195905180005', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient05');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient06', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient06', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '李明', '13800010006', 'MALE', '1991-02-14', 35, '无', '无', '510107199102140006', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient06');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient07', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient07', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '赵雪', '13800010007', 'FEMALE', '1998-09-30', 28, '头孢类', '过敏性鼻炎（季节性）', '410103199809300007', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient07');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient08', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient08', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '孙文博', '13800010008', 'MALE', '1984-06-20', 42, '无', '高血脂，口服阿托伐他汀', '320102198406200008', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient08');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient09', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient09', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '周婷婷', '13800010009', 'FEMALE', '2007-12-01', 19, '无', '无', '500112200712010009', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient09');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient10', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient10', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '吴国栋', '13800010010', 'MALE', '1971-04-08', 55, '阿司匹林', '高血压8年、痛风病史3年', '440304197104080010', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient10');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient11', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient11', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '郑小雨', '13800010011', 'FEMALE', '2014-08-25', 12, '无', '哮喘（儿童期发作，间歇使用吸入剂）', '330108201408250011', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient11');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient12', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient12', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '冯丽', '13800010012', 'FEMALE', '1981-01-12', 45, '无', '甲状腺功能减退症，口服左甲状腺素钠片', '610103198101120012', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient12');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient13', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient13', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '褚志强', '13800010013', 'MALE', '1964-10-17', 62, '无', '2型糖尿病10年、高血压15年，口服二甲双胍和氨氯地平', '120104196410170013', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient13');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient14', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient14', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '蒋芳', '13800010014', 'FEMALE', '1995-03-28', 31, '无', '无', '430103199503280014', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient14');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient15', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient15', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '沈浩', '13800010015', 'MALE', '1978-07-05', 48, '碘造影剂', '冠心病，PCI支架术后2年，口服阿司匹林和氯吡格雷', '310105197807050015', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient15');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient16', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient16', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '韩雪梅', '13800010016', 'FEMALE', '1954-12-22', 72, '青霉素、头孢类', '骨质疏松（椎体压缩骨折史）、高血压20年', '210102195412220016', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient16');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient17', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient17', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '杨波', '13800010017', 'MALE', '2000-05-10', 26, '无', '无', '530102200005100017', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient17');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient18', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient18', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '朱琳', '13800010018', 'FEMALE', '1988-11-08', 38, '无', '慢性胃炎（胃镜确诊），偶用奥美拉唑', '370102198811080018', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient18');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient19', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient19', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '秦汉', '13800010019', 'MALE', '1956-02-28', 70, '无', '前列腺增生、高血压，口服坦索罗辛和氨氯地平', '610103195602280019', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient19');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient20', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient20', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '许诺', '13800010020', 'FEMALE', '2010-06-15', 16, '无', '无', '450103201006150020', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient20');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient21', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient21', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '何勇', '13800010021', 'MALE', '1974-09-12', 52, '无', '酒精性肝病，肝功能轻度异常，定期复查', '340103197409120021', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient21');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient22', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient22', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '吕萍', '13800010022', 'FEMALE', '1966-04-03', 60, '磺胺类', '类风湿关节炎15年，口服甲氨蝶呤，偶用塞来昔布止痛', '420103196604030022', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient22');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient23', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient23', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '施伟', '13800010023', 'MALE', '2004-01-20', 22, '无', '无', '350203200401200023', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient23');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient24', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient24', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '张蕾', '13800010024', 'FEMALE', '1993-08-08', 33, '无', '妊娠24周，定期产检，无妊娠并发症', '510105199308080024', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient24');
 
 INSERT INTO patient (username, password_hash, name, phone, gender, birth_date, age, allergy_history, medical_history, id_card_number, status, created_at, updated_at)
-SELECT 'patient25', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'patient25', '$2a$10$kZAveZJrzgB1t6AdFc4SseOIg4y6md61mGEcFlDpAvx0wNqQnL.3u',
        '许文强', '13800010025', 'MALE', '1948-10-01', 78, '无', '高血压30年、2型糖尿病20年、慢性肾脏病3期，口服多种药物', '310101194810010025', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 WHERE NOT EXISTS (SELECT 1 FROM patient WHERE username = 'patient25');
 
@@ -366,7 +366,7 @@ SELECT 'internal-medicine', '内科', '一级科室', '内科常见疾病诊治'
 WHERE NOT EXISTS (SELECT 1 FROM department WHERE code = 'internal-medicine');
 
 INSERT INTO doctor (username, password_hash, name, department_id, title, specialty, introduction, status, created_at, updated_at)
-SELECT 'doctor01', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+SELECT 'doctor01', '$2a$10$lXb8fbPc6LnZvWg3LwTpdOEk2vmuvmutP7p2sWsh0s77vlBEv4qr2',
        '张明远', (SELECT id FROM department WHERE code = 'internal-medicine'),
        '主治医师', '内科常见病、多发病诊治',
        '从事内科临床工作10年，擅长内科常见病和多发病的诊断与治疗。',

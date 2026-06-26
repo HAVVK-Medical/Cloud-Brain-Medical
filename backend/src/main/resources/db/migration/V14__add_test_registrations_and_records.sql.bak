@@ -20,7 +20,7 @@ SELECT p.id, '头晕头痛三天，伴血压升高，收缩压最高165mmHg',
        'COMPLETED', 'AI', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM patient p
 WHERE p.username = 'patient04'
-  AND NOT EXISTS (SELECT 1 FROM triage_record tr WHERE tr.patient_id = p.id AND tr.chief_complaint LIKE '%头晕头痛%' AND tr.created_at > CURRENT_TIMESTAMP);
+  AND NOT EXISTS (SELECT 1 FROM triage_record tr WHERE tr.patient_id = p.id AND tr.chief_complaint LIKE '%头晕头痛%' AND tr.created_at > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 HOUR));
 
 INSERT INTO registration (patient_id, doctor_id, department_id, schedule_id, triage_record_id, registration_time, status, department_snapshot, doctor_snapshot, visit_level_snapshot, slot_released, version, created_at, updated_at)
 SELECT
@@ -29,11 +29,11 @@ SELECT
   (SELECT id FROM department WHERE code = 'cardiology'),
   (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = CURRENT_DATE AND s.period = 'AM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = (SELECT id FROM patient WHERE username = 'patient04') AND tr.chief_complaint LIKE '%头晕头痛%' ORDER BY tr.created_at DESC LIMIT 1),
-  CURRENT_TIMESTAMP, 'COMPLETED',
+  DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 2 HOUR), 'COMPLETED',
   '心内科', '李心怡 副主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient04') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient04') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 INSERT INTO medical_record (patient_id, doctor_id, registration_id, chief_complaint, present_illness, past_history, physical_exam, preliminary_diagnosis, treatment_plan, conversation_text, ai_generated, version, created_at, updated_at)
 SELECT
@@ -108,13 +108,13 @@ SELECT
   (SELECT id FROM department WHERE code = 'cardiology'),
   (SELECT s.id FROM schedule s WHERE s.doctor_id = d.id AND s.work_date = CURRENT_DATE AND s.period = 'PM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = p.id AND tr.chief_complaint LIKE '%胸闷%' ORDER BY tr.created_at DESC LIMIT 1),
-  CURRENT_TIMESTAMP, 'COMPLETED',
+  DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 HOUR), 'COMPLETED',
   '心内科', '李心怡 副主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM patient p
 CROSS JOIN doctor d
 WHERE p.username = 'patient05' AND d.username = 'doctor02'
-  AND NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = p.id AND doctor_id = d.id AND 1=1);
+  AND NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = p.id AND doctor_id = d.id AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 INSERT INTO medical_record (patient_id, doctor_id, registration_id, chief_complaint, present_illness, past_history, physical_exam, preliminary_diagnosis, treatment_plan, conversation_text, ai_generated, version, created_at, updated_at)
 SELECT
@@ -194,11 +194,11 @@ SELECT
   (SELECT id FROM department WHERE code = 'dermatology'),
   (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor07') AND s.work_date = CURRENT_DATE AND s.period = 'AM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = (SELECT id FROM patient WHERE username = 'patient03') AND tr.chief_complaint LIKE '%红疹%' ORDER BY tr.created_at DESC LIMIT 1),
-  CURRENT_TIMESTAMP, 'COMPLETED',
+  DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 4 HOUR), 'COMPLETED',
   '皮肤科', '孙丽华 主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient03') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor07') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient03') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor07') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 INSERT INTO medical_record (patient_id, doctor_id, registration_id, chief_complaint, present_illness, past_history, physical_exam, preliminary_diagnosis, treatment_plan, conversation_text, ai_generated, version, created_at, updated_at)
 SELECT
@@ -268,12 +268,12 @@ SELECT
   (SELECT id FROM department WHERE code = 'orthopedics'),
   (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor05') AND s.work_date = CURRENT_DATE AND s.period = 'AM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = (SELECT id FROM patient WHERE username = 'patient17') AND tr.chief_complaint LIKE '%膝关节%' ORDER BY tr.created_at DESC LIMIT 1),
-  CURRENT_TIMESTAMP, 'IN_PROGRESS',
+  DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 HOUR), 'IN_PROGRESS',
   '骨科', '赵刚 副主任医师', 'NORMAL',
   CURRENT_TIMESTAMP,
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient17') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor05') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient17') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor05') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 
 -- ============================================================
@@ -296,13 +296,13 @@ SELECT
   (SELECT id FROM patient WHERE username = 'patient13'),
   (SELECT id FROM doctor WHERE username = 'doctor02'),
   (SELECT id FROM department WHERE code = 'cardiology'),
-  (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = CURRENT_DATE + 1 AND s.period = 'AM' LIMIT 1),
+  (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = DATE_ADD(CURRENT_DATE, INTERVAL 1 DAY) AND s.period = 'AM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = (SELECT id FROM patient WHERE username = 'patient13') AND tr.chief_complaint LIKE '%血糖%' ORDER BY tr.created_at DESC LIMIT 1),
-  CURRENT_TIMESTAMP, 'COMPLETED',
+  DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 8 HOUR), 'COMPLETED',
   '心内科', '李心怡 副主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient13') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient13') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 INSERT INTO medical_record (patient_id, doctor_id, registration_id, chief_complaint, present_illness, past_history, physical_exam, preliminary_diagnosis, treatment_plan, conversation_text, ai_generated, version, created_at, updated_at)
 SELECT
@@ -361,13 +361,13 @@ SELECT
   (SELECT id FROM patient WHERE username = 'patient15'),
   (SELECT id FROM doctor WHERE username = 'doctor02'),
   (SELECT id FROM department WHERE code = 'cardiology'),
-  (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = CURRENT_DATE + 1 AND s.period = 'PM' LIMIT 1),
+  (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = DATE_ADD(CURRENT_DATE, INTERVAL 1 DAY) AND s.period = 'PM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = (SELECT id FROM patient WHERE username = 'patient15') AND tr.chief_complaint LIKE '%PCI术后%' ORDER BY tr.created_at DESC LIMIT 1),
-  CURRENT_TIMESTAMP, 'COMPLETED',
+  DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 10 HOUR), 'COMPLETED',
   '心内科', '李心怡 副主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient15') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient15') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 INSERT INTO medical_record (patient_id, doctor_id, registration_id, chief_complaint, present_illness, past_history, physical_exam, preliminary_diagnosis, treatment_plan, conversation_text, ai_generated, version, created_at, updated_at)
 SELECT
@@ -441,7 +441,7 @@ SELECT
   '神经内科', '王建华 主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient02') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor03') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient02') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor03') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));
 
 
 -- ============================================================
@@ -464,10 +464,10 @@ SELECT
   (SELECT id FROM patient WHERE username = 'patient24'),
   (SELECT id FROM doctor WHERE username = 'doctor02'),
   (SELECT id FROM department WHERE code = 'cardiology'),
-  (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = CURRENT_DATE + 2 AND s.period = 'AM' LIMIT 1),
+  (SELECT s.id FROM schedule s WHERE s.doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND s.work_date = DATE_ADD(CURRENT_DATE, INTERVAL 2 DAY) AND s.period = 'AM' LIMIT 1),
   (SELECT tr.id FROM triage_record tr WHERE tr.patient_id = (SELECT id FROM patient WHERE username = 'patient24') AND tr.chief_complaint LIKE '%孕%心悸%' ORDER BY tr.created_at DESC LIMIT 1),
   CURRENT_TIMESTAMP, 'WAITING',
   '心内科', '李心怡 副主任医师', 'NORMAL',
   FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient24') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND 1=1);
+WHERE NOT EXISTS (SELECT 1 FROM registration WHERE patient_id = (SELECT id FROM patient WHERE username = 'patient24') AND doctor_id = (SELECT id FROM doctor WHERE username = 'doctor02') AND registration_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY));

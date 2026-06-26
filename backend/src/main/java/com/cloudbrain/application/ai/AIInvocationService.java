@@ -104,17 +104,32 @@ public class AIInvocationService {
         Map<String, String> safe = variables == null ? Map.of() : variables;
         return switch (normalize(taskType)) {
             case "TRIAGE" -> String.join("\n",
-                    "请输出分诊解释。",
+                    "请根据主诉独立判断最合适的科室，不要受任何已有科室提示的影响。",
                     "主诉：" + safe.getOrDefault("chiefComplaint", ""),
-                    "候选科室：" + safe.getOrDefault("departmentName", ""),
-                    "候选医生：" + safe.getOrDefault("doctorNames", ""));
+                    "",
+                    "请按以下格式输出（每行一个键值对，用英文冒号分隔）：",
+                    "recommendedDepartment: 推荐科室全称（如：心内科、神经内科、骨科、皮肤科、内科）",
+                    "reason: 推荐理由（1-2句话）");
             case "MEDICAL_RECORD" -> String.join("\n",
-                    "请输出结构化病历草稿。",
+                    "请根据问诊内容生成结构化病历草稿，按以下格式输出（每行一个键值对，英文冒号分隔）：",
+                    "chiefComplaint: 主诉（简明扼要）",
+                    "presentIllness: 现病史",
+                    "pastHistory: 既往史",
+                    "physicalExam: 体格检查",
+                    "preliminaryDiagnosis: 初步诊断",
+                    "treatmentPlan: 治疗计划",
+                    "docNote: 备注",
+                    "",
                     "问诊文本：" + safe.getOrDefault("conversationText", ""),
                     "诊断方向：" + safe.getOrDefault("diagnosisDirection", ""),
                     "科室：" + safe.getOrDefault("departmentName", ""));
             case "DIAGNOSIS" -> String.join("\n",
-                    "请输出诊疗建议。",
+                    "请根据问诊内容提供诊疗建议，按以下格式输出（每行一个键值对，英文冒号分隔）：",
+                    "suggestedDiagnoses: 可能的诊断列表（每行一个，附带置信度百分比）",
+                    "suggestedExamItems: 建议检查项目",
+                    "summary: 总结",
+                    "finalDiagnosisDirection: 最终诊断方向",
+                    "",
                     "问诊文本：" + safe.getOrDefault("conversationText", ""),
                     "初步方向：" + safe.getOrDefault("diagnosisDirection", ""),
                     "科室：" + safe.getOrDefault("departmentName", ""));

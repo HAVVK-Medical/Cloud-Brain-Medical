@@ -118,6 +118,16 @@ function truncate(value: string | null | undefined, length = 64) {
   return compact.length > length ? `${compact.slice(0, length)}...` : compact;
 }
 
+function syncDoctorSelection() {
+  // Only keep the current selection if it is one of the triage-recommended doctors
+  const recommended = triageResult.value?.recommendedDoctors ?? [];
+  if (selectedDoctorId.value && recommended.some((item: DoctorOption) => item.id === selectedDoctorId.value)) {
+    return;
+  }
+  // Otherwise, prefer the triage recommendation
+  selectedDoctorId.value = recommended[0]?.id ?? doctors.value[0]?.id ?? null;
+}
+
 function syncScheduleSelection() {
   const items = visibleSchedules.value;
   if (selectedScheduleId.value && items.some((item) => item.id === selectedScheduleId.value)) {
@@ -126,43 +136,37 @@ function syncScheduleSelection() {
   selectedScheduleId.value = items[0]?.id ?? triageResult.value?.availableSchedules[0]?.id ?? null;
 }
 
-function syncDoctorSelection() {
-  if (selectedDoctorId.value && doctors.value.some((item) => item.id === selectedDoctorId.value)) {
-    return;
-  }
-  selectedDoctorId.value = triageResult.value?.recommendedDoctors[0]?.id ?? doctors.value[0]?.id ?? null;
-}
-
 function applyTriageSelection(result: TriageResponse) {
   triageResult.value = result;
-  if (result.recommendedDepartmentId !== null) {
-    selectedDepartmentId.value = result.recommendedDepartmentId;
-  }
-  syncDoctorSelection();
-  selectedScheduleId.value = result.availableSchedules[0]?.id ?? selectedScheduleId.value;
+  // Clear old selections so the triage recommendation always takes priority
+  selectedDepartmentId.value = result.recommendedDepartmentId ?? null;
+  selectedDoctorId.value = null;
 }
 
-async function loadCatalog() {
+async function loadCatalog(departmentId: number | null) {
   const [departmentData, doctorData, scheduleData] = await Promise.all([
     listDepartments(),
-    listDoctors(selectedDepartmentId.value),
-    listSchedules(selectedDepartmentId.value),
+    listDoctors(departmentId),
+    listSchedules(departmentId),
   ]);
+
+  const deptChanged = departmentId !== selectedDepartmentId.value;
 
   departments.value = departmentData;
   doctors.value = doctorData;
   schedules.value = scheduleData;
 
-  if (selectedDepartmentId.value !== null && !departmentData.some((item) => item.id === selectedDepartmentId.value)) {
-    selectedDepartmentId.value = departmentData[0]?.id ?? null;
+  // If the triage-recommended department is gone, fall back to first available
+  if (departmentId !== null && !departmentData.some((item) => item.id === departmentId)) {
+    departmentId = departmentData[0]?.id ?? null;
   }
+  selectedDepartmentId.value = departmentId;
 
-  if (selectedDoctorId.value !== null && !doctorData.some((item) => item.id === selectedDoctorId.value)) {
-    selectedDoctorId.value = triageResult.value?.recommendedDoctors[0]?.id ?? doctorData[0]?.id ?? null;
-  } else if (selectedDoctorId.value === null) {
-    syncDoctorSelection();
+  // Clear doctor selection when department changes, then sync from triage or fallback
+  if (deptChanged) {
+    selectedDoctorId.value = null;
   }
-
+  syncDoctorSelection();
   syncScheduleSelection();
 }
 
@@ -207,7 +211,7 @@ async function refreshAll() {
   error.value = '';
   try {
     await loadPatientData();
-    await loadCatalog();
+    await loadCatalog(selectedDepartmentId.value);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '患者工作台加载失败');
   } finally {
@@ -220,7 +224,7 @@ async function chooseDepartment(departmentId: number | null) {
   loading.value = true;
   error.value = '';
   try {
-    await loadCatalog();
+    await loadCatalog(departmentId);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '加载科室失败');
   } finally {
@@ -251,7 +255,7 @@ async function runTriage() {
     });
     applyTriageSelection(result);
     triageHistory.value = [result, ...triageHistory.value.filter((item) => item.triageRecordId !== result.triageRecordId)];
-    await loadCatalog();
+    await loadCatalog(selectedDepartmentId.value);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '分诊失败');
   } finally {

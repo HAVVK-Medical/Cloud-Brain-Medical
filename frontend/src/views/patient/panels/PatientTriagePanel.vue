@@ -24,13 +24,16 @@ const { workspace } = defineProps<{ workspace: any }>();
 
     <div v-if="workspace.triageResult" class="space-y-4">
       <!-- AI / Local badge -->
-      <div class="flex items-center gap-2">
-        <span v-if="workspace.triageResult.recommendationSource !== 'LOCAL_RULE'" class="ai-badge">AI 推荐</span>
-        <span v-else class="degraded-badge">本地规则匹配</span>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span v-if="workspace.triageResult.degraded" class="degraded-badge">本地规则匹配</span>
+        <span v-else class="ai-badge">AI 推荐</span>
+        <span v-if="workspace.triageResult.aiRecommendedDept && workspace.triageResult.aiRecommendedDept !== workspace.triageResult.recommendedDept" class="text-xs text-warning">
+          (AI 建议: {{ workspace.triageResult.aiRecommendedDept }}, 已采纳)
+        </span>
       </div>
 
       <!-- Degraded notice -->
-      <div v-if="workspace.triageResult.recommendationSource === 'LOCAL_RULE'" class="ai-degraded-notice">
+      <div v-if="workspace.triageResult.degraded" class="ai-degraded-notice">
         ⚠️ AI 服务不可用，当前使用本地规则引擎匹配，建议结合人工判断。
       </div>
 
@@ -39,7 +42,7 @@ const { workspace } = defineProps<{ workspace: any }>();
           <span class="text-2xl">🏥</span>
           <div>
             <p class="text-lg font-semibold text-brand">{{ workspace.triageResult.recommendedDept }}</p>
-            <p class="text-xs text-text-secondary">AI 根据您的症状智能匹配</p>
+            <p class="text-xs text-text-secondary">{{ workspace.triageResult.degraded ? '本地规则根据关键词匹配' : 'AI 根据您的症状智能匹配' }}</p>
           </div>
         </div>
       </SectionCard>

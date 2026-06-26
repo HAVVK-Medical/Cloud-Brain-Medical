@@ -89,7 +89,10 @@ public final class WorkflowDtos {
             List<ScheduleOption> availableSchedules,
             String reason,
             String callStatus,
-            String recommendationSource
+            String recommendationSource,
+            Long aiRecommendedDepartmentId,
+            String aiRecommendedDept,
+            boolean degraded
     ) {
     }
 
@@ -173,7 +176,8 @@ public final class WorkflowDtos {
             String docNote,
             Boolean aiGenerated,
             Integer version,
-            Instant createdAt
+            Instant createdAt,
+            boolean degraded
     ) {
     }
 
@@ -194,7 +198,8 @@ public final class WorkflowDtos {
             String suggestedDiagnoses,
             String suggestedExamItems,
             String adoptionStatus,
-            String summary
+            String summary,
+            boolean degraded
     ) {
     }
 

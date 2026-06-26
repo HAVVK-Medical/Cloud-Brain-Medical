@@ -96,6 +96,8 @@ const itemSeed = ref(1);
 const savingRecord = ref(false);
 const generatingRecord = ref(false);
 const diagnosingRecord = ref(false);
+const recordDegraded = ref(false);
+const diagnosisDegraded = ref(false);
 const reviewingPrescription = ref(false);
 const submittingPrescription = ref(false);
 const showPrescriptionConfirm = ref(false);
@@ -187,6 +189,8 @@ const doctorWorkspace = reactive({
   savingRecord,
   generatingRecord,
   diagnosingRecord,
+  recordDegraded,
+  diagnosisDegraded,
   reviewingPrescription,
   submittingPrescription,
   startingConsultation,
@@ -314,23 +318,44 @@ function applyMedicalRecordDraft(draft: MedicalRecordSummary) {
     docNote: draft.docNote || recordForm.docNote,
     aiGenerated: draft.aiGenerated ?? true,
   });
+  recordDegraded.value = draft.degraded ?? false;
   consultationForm.diagnosisDirection = draft.preliminaryDiagnosis || consultationForm.diagnosisDirection;
 }
 
 function applyDiagnosisResult(result: DiagnosisSuggestionResponse) {
   diagnosisSuggestion.value = result;
+  diagnosisDegraded.value = result.degraded ?? false;
   recordForm.preliminaryDiagnosis = result.suggestedDiagnoses.split('\n')[0] || recordForm.preliminaryDiagnosis;
 }
 
+function resetPerPatientState() {
+  // Cancel any in-flight SSE stream for the previous patient
+  if (activeStreamSessionId.value) {
+    try {
+      cancelAiStreamSession(activeStreamSessionId.value).catch(() => {});
+    } catch {
+      // stream may already have ended
+    }
+    activeStreamSessionId.value = null;
+  }
+  streamText.value = '';
+  recordDegraded.value = false;
+  diagnosisDegraded.value = false;
+
+  Object.assign(recordForm, emptyRecordForm());
+  consultationForm.conversationText = '';
+  consultationForm.diagnosisDirection = '';
+  manualConfirmation.value = '医生已完成本地规则审方并确认。';
+  diagnosisSuggestion.value = null;
+  reviewResult.value = null;
+  prescriptionItems.value = [createEmptyItem()];
+}
+
 function syncFormsFromWorkspace(snapshot: ConsultationWorkspace | null) {
+  // Always reset per-patient transient state first
+  resetPerPatientState();
+
   if (!snapshot) {
-    Object.assign(recordForm, emptyRecordForm());
-    consultationForm.conversationText = '';
-    consultationForm.diagnosisDirection = '';
-    manualConfirmation.value = '医生已完成本地规则审方并确认。';
-    diagnosisSuggestion.value = null;
-    reviewResult.value = null;
-    prescriptionItems.value = [createEmptyItem()];
     return;
   }
 
@@ -668,10 +693,13 @@ async function startAiStream(taskType: 'MEDICAL_RECORD' | 'DIAGNOSIS') {
     throw new Error('event source unsupported');
   }
 
+  // Capture the registration ID at stream start to guard against patient switches
+  const streamRegistrationId = selectedRegistrationId.value;
+
   streamText.value = '';
   const session = await createAiStreamSession({
     taskType,
-    registrationId: selectedRegistrationId.value,
+    registrationId: streamRegistrationId,
     conversationText: consultationForm.conversationText.trim(),
     diagnosisDirection: consultationForm.diagnosisDirection.trim() || null,
   });
@@ -687,11 +715,15 @@ async function startAiStream(taskType: 'MEDICAL_RECORD' | 'DIAGNOSIS') {
       resolve();
     };
 
+    // Guard: only apply chunk text if the registration hasn't changed
     source.addEventListener('chunk', (event) => {
+      if (selectedRegistrationId.value !== streamRegistrationId) return;
       const payload = parseSsePayload<{ text?: string }>(event.data);
       streamText.value += payload?.text ?? event.data;
     });
+    // Guard: only apply results if the registration hasn't changed
     source.addEventListener('result', (event) => {
+      if (selectedRegistrationId.value !== streamRegistrationId) return;
       if (taskType === 'MEDICAL_RECORD') {
         const payload = parseSsePayload<MedicalRecordSummary>(event.data);
         if (payload) applyMedicalRecordDraft(payload);
