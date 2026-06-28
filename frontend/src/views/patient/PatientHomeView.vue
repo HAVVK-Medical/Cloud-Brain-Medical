@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { CalendarDays, FileText, RefreshCw, Stethoscope, Ticket, UserRound } from 'lucide-vue-next';
+import { CalendarDays, FileText, ScanSearch, Ticket, UserRound } from 'lucide-vue-next';
+import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
 
 import {
   cancelRegistration,
@@ -31,14 +32,18 @@ import type {
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
 import { resolveUiErrorMessage } from '@/utils/zh';
-import PatientHistoryPanel from '@/views/patient/panels/PatientHistoryPanel.vue';
-import PatientOverviewPanel from '@/views/patient/panels/PatientOverviewPanel.vue';
-import PatientProfilePanel from '@/views/patient/panels/PatientProfilePanel.vue';
-import PatientRecordsPanel from '@/views/patient/panels/PatientRecordsPanel.vue';
-import PatientRegistrationPanel from '@/views/patient/panels/PatientRegistrationPanel.vue';
-import PatientTriagePanel from '@/views/patient/panels/PatientTriagePanel.vue';
+import PhoneFrame from '@/components/layout/PhoneFrame.vue';
+import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
 
 const authStore = useAuthStore();
+
+const tabs = [
+  { id: 'overview', label: '概览', icon: CalendarDays, path: '/patient/overview' },
+  { id: 'triage', label: '分诊', icon: ScanSearch, path: '/patient/triage' },
+  { id: 'registration', label: '挂号', icon: Ticket, path: '/patient/registration' },
+  { id: 'records', label: '病历', icon: FileText, path: '/patient/records' },
+  { id: 'profile', label: '我的', icon: UserRound, path: '/patient/profile' },
+] as const;
 
 const loading = ref(false);
 const triaging = ref(false);
@@ -94,33 +99,6 @@ const latestTriage = computed(() => triageHistory.value[0] ?? triageResult.value
 const activeTone = computed(() => (error.value ? 'danger' : loading.value ? 'loading' : 'healthy'));
 const displayName = computed(() => patient.value?.realName || patient.value?.username || authStore.sessionLabel);
 
-const patientPanels = [
-  { id: 'overview', label: '总览' },
-  { id: 'triage', label: '分诊' },
-  { id: 'registration', label: '挂号' },
-  { id: 'records', label: '病历' },
-  { id: 'profile', label: '资料' },
-  { id: 'history', label: '历史' },
-] as const;
-
-const activePatientPanel = ref<(typeof patientPanels)[number]['id']>('overview');
-const patientPanelComponent = computed(() => {
-  switch (activePatientPanel.value) {
-    case 'triage':
-      return PatientTriagePanel;
-    case 'registration':
-      return PatientRegistrationPanel;
-    case 'records':
-      return PatientRecordsPanel;
-    case 'profile':
-      return PatientProfilePanel;
-    case 'history':
-      return PatientHistoryPanel;
-    default:
-      return PatientOverviewPanel;
-  }
-});
-
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return '未记录';
@@ -140,6 +118,16 @@ function truncate(value: string | null | undefined, length = 64) {
   return compact.length > length ? `${compact.slice(0, length)}...` : compact;
 }
 
+function syncDoctorSelection() {
+  // Only keep the current selection if it is one of the triage-recommended doctors
+  const recommended = triageResult.value?.recommendedDoctors ?? [];
+  if (selectedDoctorId.value && recommended.some((item: DoctorOption) => item.id === selectedDoctorId.value)) {
+    return;
+  }
+  // Otherwise, prefer the triage recommendation
+  selectedDoctorId.value = recommended[0]?.id ?? doctors.value[0]?.id ?? null;
+}
+
 function syncScheduleSelection() {
   const items = visibleSchedules.value;
   if (selectedScheduleId.value && items.some((item) => item.id === selectedScheduleId.value)) {
@@ -148,43 +136,37 @@ function syncScheduleSelection() {
   selectedScheduleId.value = items[0]?.id ?? triageResult.value?.availableSchedules[0]?.id ?? null;
 }
 
-function syncDoctorSelection() {
-  if (selectedDoctorId.value && doctors.value.some((item) => item.id === selectedDoctorId.value)) {
-    return;
-  }
-  selectedDoctorId.value = triageResult.value?.recommendedDoctors[0]?.id ?? doctors.value[0]?.id ?? null;
-}
-
 function applyTriageSelection(result: TriageResponse) {
   triageResult.value = result;
-  if (result.recommendedDepartmentId !== null) {
-    selectedDepartmentId.value = result.recommendedDepartmentId;
-  }
-  syncDoctorSelection();
-  selectedScheduleId.value = result.availableSchedules[0]?.id ?? selectedScheduleId.value;
+  // Clear old selections so the triage recommendation always takes priority
+  selectedDepartmentId.value = result.recommendedDepartmentId ?? null;
+  selectedDoctorId.value = null;
 }
 
-async function loadCatalog() {
+async function loadCatalog(departmentId: number | null) {
   const [departmentData, doctorData, scheduleData] = await Promise.all([
     listDepartments(),
-    listDoctors(selectedDepartmentId.value),
-    listSchedules(selectedDepartmentId.value),
+    listDoctors(departmentId),
+    listSchedules(departmentId),
   ]);
+
+  const deptChanged = departmentId !== selectedDepartmentId.value;
 
   departments.value = departmentData;
   doctors.value = doctorData;
   schedules.value = scheduleData;
 
-  if (selectedDepartmentId.value !== null && !departmentData.some((item) => item.id === selectedDepartmentId.value)) {
-    selectedDepartmentId.value = departmentData[0]?.id ?? null;
+  // If the triage-recommended department is gone, fall back to first available
+  if (departmentId !== null && !departmentData.some((item) => item.id === departmentId)) {
+    departmentId = departmentData[0]?.id ?? null;
   }
+  selectedDepartmentId.value = departmentId;
 
-  if (selectedDoctorId.value !== null && !doctorData.some((item) => item.id === selectedDoctorId.value)) {
-    selectedDoctorId.value = triageResult.value?.recommendedDoctors[0]?.id ?? doctorData[0]?.id ?? null;
-  } else if (selectedDoctorId.value === null) {
-    syncDoctorSelection();
+  // Clear doctor selection when department changes, then sync from triage or fallback
+  if (deptChanged) {
+    selectedDoctorId.value = null;
   }
-
+  syncDoctorSelection();
   syncScheduleSelection();
 }
 
@@ -229,7 +211,7 @@ async function refreshAll() {
   error.value = '';
   try {
     await loadPatientData();
-    await loadCatalog();
+    await loadCatalog(selectedDepartmentId.value);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '患者工作台加载失败');
   } finally {
@@ -242,7 +224,7 @@ async function chooseDepartment(departmentId: number | null) {
   loading.value = true;
   error.value = '';
   try {
-    await loadCatalog();
+    await loadCatalog(departmentId);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '加载科室失败');
   } finally {
@@ -273,7 +255,7 @@ async function runTriage() {
     });
     applyTriageSelection(result);
     triageHistory.value = [result, ...triageHistory.value.filter((item) => item.triageRecordId !== result.triageRecordId)];
-    await loadCatalog();
+    await loadCatalog(selectedDepartmentId.value);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '分诊失败');
   } finally {
@@ -396,9 +378,6 @@ const workspace = reactive({
   latestTriage,
   activeTone,
   displayName,
-  setActivePatientPanel: (panel: (typeof patientPanels)[number]['id']) => {
-    activePatientPanel.value = panel;
-  },
   chooseDepartment,
   chooseDoctor,
   chooseSchedule,
@@ -418,62 +397,34 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="page patient-page">
-    <div class="band workspace-shell">
-      <div class="band-header">
-        <div>
-          <h2 class="band-title">患者工作区</h2>
-          <p class="band-copy">分诊、挂号、病历、资料和历史分区展示，手机端也能顺着流程操作。</p>
-        </div>
-        <span class="status-chip" :data-tone="activeTone">
-          <span class="chip-dot" />
-          <span>{{ displayName }}</span>
-        </span>
+  <PhoneFrame>
+    <div class="flex flex-col h-full">
+      <div class="flex-1 overflow-y-auto">
+        <p v-if="error" class="mx-4 mt-3 p-2.5 rounded-md bg-red-50 text-danger text-xs">{{ error }}</p>
+
+        <RouterView v-slot="{ Component: PanelComp }">
+          <Suspense>
+            <component :is="PanelComp" :workspace="workspace" v-if="PanelComp" />
+          </Suspense>
+        </RouterView>
+
+        <LoadingSkeleton v-if="loading" :rows="3" class="p-4" />
       </div>
 
-      <div class="toolbar workspace-topline">
-        <span class="pill" :data-tone="triageResult ? 'healthy' : 'loading'">
-          <FileText :size="14" />
-          <span>{{ triageResult ? '已分诊' : '待分诊' }}</span>
-        </span>
-        <span class="pill">
-          <Stethoscope :size="14" />
-          <span>{{ triageResult?.recommendedDoctors.length ?? 0 }} 位推荐医生</span>
-        </span>
-        <span class="pill">
-          <Ticket :size="14" />
-          <span>{{ waitingRegistrations.length }} 个待处理挂号</span>
-        </span>
-        <span class="pill">
-          <CalendarDays :size="14" />
-          <span>{{ completedRegistrations.length }} 个已完成就诊</span>
-        </span>
-        <span class="pill">
-          <UserRound :size="14" />
-          <span>{{ patient?.patientId ?? authStore.patientId ?? '未知患者' }}</span>
-        </span>
-        <button class="button-ghost" type="button" @click="refreshAll" :disabled="loading">
-          <RefreshCw :size="16" :class="{ spinning: loading }" />
-          <span>刷新</span>
-        </button>
-      </div>
-
-      <p class="auth-error" v-if="error">{{ error }}</p>
-
-      <div class="segmented workspace-tabs">
-        <button
-          v-for="panel in patientPanels"
-          :key="panel.id"
-          type="button"
-          class="segment"
-          :class="{ active: activePatientPanel === panel.id }"
-          @click="activePatientPanel = panel.id"
+      <!-- Bottom tab bar -->
+      <div class="shrink-0 bg-white border-t border-border flex">
+        <RouterLink
+          v-for="tab in tabs"
+          :key="tab.id"
+          :to="tab.path"
+          class="flex-1 flex flex-col items-center gap-0.5 py-2 text-xs transition no-underline"
+          :class="$route.path.startsWith(tab.path) ? 'text-brand' : 'text-text-secondary'"
         >
-          <span>{{ panel.label }}</span>
-        </button>
+          <component :is="tab.icon" :size="18" />
+          <span>{{ tab.label }}</span>
+        </RouterLink>
       </div>
-
-      <component :is="patientPanelComponent" :workspace="workspace" />
     </div>
-  </section>
+  </PhoneFrame>
+  <AiChatLauncher role="patient" />
 </template>

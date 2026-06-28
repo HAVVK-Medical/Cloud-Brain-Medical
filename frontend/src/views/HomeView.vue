@@ -1,135 +1,58 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { ArrowRight, CalendarDays, Stethoscope, ShieldCheck, Sparkles } from 'lucide-vue-next';
+import { Stethoscope, ShieldCheck, UserRound } from 'lucide-vue-next';
 import { RouterLink } from 'vue-router';
 
 import { useAppStore } from '@/stores/app';
-import { useAuthStore } from '@/stores/auth';
-import { getHealthStatusLabel, getServiceLabel } from '@/utils/zh';
+import { getServiceLabel } from '@/utils/zh';
+import StatusChip from '@/components/shared/StatusChip.vue';
 
 const appStore = useAppStore();
-const authStore = useAuthStore();
 
 const healthText = computed(() => {
-  if (appStore.loading) {
-    return '刷新中';
-  }
-
-  if (appStore.degraded) {
-    return '异常';
-  }
-
+  if (appStore.loading) return '检查中';
+  if (appStore.degraded) return '异常';
   return getServiceLabel(appStore.health?.service ?? '后端待启动');
-});
-
-const accessTarget = computed(() => {
-  if (!authStore.isAuthenticated || authStore.isExpired) {
-    return '/login';
-  }
-
-  return authStore.role === 'doctor'
-    ? '/doctor'
-    : authStore.role === 'admin'
-      ? '/admin'
-      : '/patient';
 });
 </script>
 
 <template>
-  <section class="page">
-    <div class="band">
-      <div class="band-header">
-        <div>
-          <h2 class="band-title">运行入口</h2>
-          <p class="band-copy">
-            前端工作台已接入后端探针，患者、医生、管理三个入口已经就位。
-          </p>
-        </div>
-        <span class="status-chip" data-tone="healthy">
-          <span class="chip-dot" />
-          <span>{{ healthText }}</span>
-        </span>
-      </div>
-
-      <div class="launch-grid">
-        <RouterLink class="launch-card" to="/login">
-          <div class="card-head">
-            <h2>登录入口</h2>
-            <ArrowRight :size="18" />
-          </div>
-          <p>{{ authStore.isAuthenticated ? authStore.sessionLabel : '请先登录或注册' }}</p>
-        </RouterLink>
-
-        <RouterLink class="launch-card" to="/patient">
-          <div class="card-head">
-            <h2>患者端</h2>
-            <ArrowRight :size="18" />
-          </div>
-          <p>面向患者的挂号、就诊和病历入口。</p>
-        </RouterLink>
-
-        <RouterLink class="launch-card" to="/doctor">
-          <div class="card-head">
-            <h2>医生端</h2>
-            <ArrowRight :size="18" />
-          </div>
-          <p>面向医生的工作台、接诊与处方审核入口。</p>
-        </RouterLink>
-
-        <RouterLink class="launch-card" to="/admin">
-          <div class="card-head">
-            <h2>管理端</h2>
-            <ArrowRight :size="18" />
-          </div>
-          <p>面向管理员的科室、排班、药品与配置入口。</p>
-        </RouterLink>
-
-        <RouterLink class="launch-card" :to="accessTarget">
-          <div class="card-head">
-            <h2>继续进入</h2>
-            <ArrowRight :size="18" />
-          </div>
-          <p>从当前会话继续进入对应工作区。</p>
-        </RouterLink>
-      </div>
+  <div class="max-w-3xl mx-auto py-16 px-6">
+    <div class="text-center mb-10">
+      <h1 class="text-2xl font-bold text-text-main">智慧云脑诊疗平台</h1>
+      <p class="text-text-secondary mt-2 text-sm">选择您的角色进入工作区</p>
     </div>
 
-    <div class="metric-grid">
-      <article class="metric">
-        <div class="card-head">
-          <h3>后端状态</h3>
-          <ShieldCheck :size="18" />
+    <div class="grid grid-cols-3 gap-6">
+      <RouterLink to="/patient" class="card text-center hover:border-brand hover:shadow-md transition cursor-pointer no-underline">
+        <div class="w-12 h-12 rounded-xl bg-brand-soft text-brand flex items-center justify-center mx-auto mb-3">
+          <UserRound :size="24" />
         </div>
-        <div class="metric-value">{{ getHealthStatusLabel(appStore.health?.status ?? 'INIT') }}</div>
-        <p>探针已连接到 `/api/health`。</p>
-      </article>
+        <h2 class="text-base font-semibold text-text-main">患者端</h2>
+        <p class="text-xs text-text-secondary mt-1">分诊、挂号、看病历</p>
+      </RouterLink>
 
-      <article class="metric">
-        <div class="card-head">
-          <h3>当前阶段</h3>
-          <Sparkles :size="18" />
+      <RouterLink to="/doctor" class="card text-center hover:border-brand hover:shadow-md transition cursor-pointer no-underline">
+        <div class="w-12 h-12 rounded-xl bg-brand-soft text-brand flex items-center justify-center mx-auto mb-3">
+          <Stethoscope :size="24" />
         </div>
-        <div class="metric-value">骨架</div>
-        <p>当前仅保留最小可运行结构，业务流程后续补齐。</p>
-      </article>
+        <h2 class="text-base font-semibold text-text-main">医生端</h2>
+        <p class="text-xs text-text-secondary mt-1">接诊、病历、审方</p>
+      </RouterLink>
 
-      <article class="metric">
-        <div class="card-head">
-          <h3>进度</h3>
-          <CalendarDays :size="18" />
+      <RouterLink to="/admin" class="card text-center hover:border-brand hover:shadow-md transition cursor-pointer no-underline">
+        <div class="w-12 h-12 rounded-xl bg-brand-soft text-brand flex items-center justify-center mx-auto mb-3">
+          <ShieldCheck :size="24" />
         </div>
-        <div class="metric-value">就绪</div>
-        <p>路由和工作区已经准备好，可继续下一轮实现。</p>
-      </article>
-
-      <article class="metric">
-        <div class="card-head">
-          <h3>医生入口</h3>
-          <Stethoscope :size="18" />
-        </div>
-        <div class="metric-value">已开放</div>
-        <p>接诊入口已经接通并可见。</p>
-      </article>
+        <h2 class="text-base font-semibold text-text-main">管理端</h2>
+        <p class="text-xs text-text-secondary mt-1">数据维护、配置、审计</p>
+      </RouterLink>
     </div>
-  </section>
+
+    <div class="mt-10 text-center">
+      <StatusChip :tone="appStore.health?.status === 'UP' ? 'success' : 'danger'">
+        {{ healthText }}
+      </StatusChip>
+    </div>
+  </div>
 </template>

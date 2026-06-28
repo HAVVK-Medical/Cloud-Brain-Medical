@@ -163,43 +163,45 @@ watch(() => props, () => void nextTick(renderCharts), { deep: true });
 </script>
 
 <template>
-  <section class="section">
-    <div class="section-head">
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
       <div>
-        <h3 class="section-title">数据看板</h3>
-        <p class="section-copy">就诊趋势、AI 使用、处方风险和分诊反馈按当前账号视角汇总。</p>
+        <h3 class="text-base font-semibold text-text-main">数据看板</h3>
+        <p class="text-xs text-text-secondary mt-0.5">就诊趋势、AI 使用、处方风险和分诊反馈按当前账号视角汇总。</p>
       </div>
-      <span class="pill">更新 {{ overview?.updatedAt ? new Date(overview.updatedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '待刷新' }}</span>
+      <span class="text-xs text-text-secondary">
+        更新 {{ overview?.updatedAt ? new Date(overview.updatedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '待刷新' }}
+      </span>
     </div>
 
-    <div class="chart-grid">
-      <article class="chart-panel chart-panel-wide">
-        <div class="chart-title">近 14 日趋势</div>
-        <div ref="trendEl" class="chart-canvas" />
+    <div class="grid grid-cols-2 gap-4">
+      <article class="col-span-2 border border-border rounded-lg p-4 bg-white">
+        <div class="text-sm font-medium text-text-main mb-2">近 14 日趋势</div>
+        <div ref="trendEl" style="height: 280px" />
       </article>
-      <article class="chart-panel">
-        <div class="chart-title">AI 使用率</div>
-        <div ref="aiEl" class="chart-canvas" />
+      <article class="border border-border rounded-lg p-4 bg-white">
+        <div class="text-sm font-medium text-text-main mb-2">AI 使用率</div>
+        <div ref="aiEl" style="height: 240px" />
       </article>
-      <article class="chart-panel">
-        <div class="chart-title">风险分布</div>
-        <div ref="riskEl" class="chart-canvas" />
+      <article class="border border-border rounded-lg p-4 bg-white">
+        <div class="text-sm font-medium text-text-main mb-2">风险分布</div>
+        <div ref="riskEl" style="height: 240px" />
       </article>
-      <article class="chart-panel">
-        <div class="chart-title">分诊准确率 {{ triageAccuracy?.accuracyRate ?? 0 }}%</div>
-        <div ref="triageEl" class="chart-canvas" />
+      <article class="col-span-2 border border-border rounded-lg p-4 bg-white">
+        <div class="text-sm font-medium text-text-main mb-2">分诊准确率 {{ triageAccuracy?.accuracyRate ? Math.round(triageAccuracy.accuracyRate * 100) : 0 }}%</div>
+        <div ref="triageEl" style="height: 260px" />
       </article>
     </div>
 
-    <div class="review-rate-grid">
-      <div class="mini-item" v-for="item in reviewRateItems" :key="item.label">
-        <span class="label">{{ item.label }}</span>
-        <span class="value">{{ item.value }}</span>
+    <div class="grid grid-cols-6 gap-3">
+      <div v-for="item in reviewRateItems" :key="item.label" class="card !p-3 text-center">
+        <span class="text-xs text-text-secondary">{{ item.label }}</span>
+        <span class="block text-lg font-bold text-text-main">{{ item.value }}</span>
       </div>
-      <div class="mini-item">
-        <span class="label">审核通过率</span>
-        <span class="value">{{ prescriptionReviewRate?.passRate ?? 0 }}%</span>
+      <div class="card !p-3 text-center">
+        <span class="text-xs text-text-secondary">审核通过率</span>
+        <span class="block text-lg font-bold text-text-main">{{ prescriptionReviewRate?.passRate ?? 0 }}%</span>
       </div>
     </div>
-  </section>
+  </div>
 </template>

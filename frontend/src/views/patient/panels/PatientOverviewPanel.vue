@@ -1,105 +1,62 @@
 <script setup lang="ts">
-import { CalendarDays, FileText, ScanSearch, Stethoscope, Ticket } from 'lucide-vue-next';
+import SectionCard from '@/components/shared/SectionCard.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
+import EmptyState from '@/components/shared/EmptyState.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
 </script>
 
 <template>
-  <section class="section workspace-panel">
-    <div class="section-head">
-      <div>
-        <h3 class="section-title">工作台概览</h3>
-        <p class="section-copy">先看当前分诊、挂号和近期记录，再进入具体操作。</p>
+  <div class="p-4 space-y-4">
+    <p class="text-sm font-semibold text-text-main">你好，{{ workspace.displayName }}</p>
+
+    <SectionCard v-if="workspace.latestRegistration" title="当前挂号">
+      <div class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <span class="text-text-secondary">科室</span>
+          <span class="font-medium">{{ workspace.latestRegistration.departmentName }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-text-secondary">医生</span>
+          <span class="font-medium">{{ workspace.latestRegistration.doctorName }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-text-secondary">日期</span>
+          <span class="font-medium">{{ workspace.formatDate(workspace.latestRegistration.workDate) }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-text-secondary">状态</span>
+          <StatusChip :tone="workspace.latestRegistration.status === 'WAITING' ? 'info' : workspace.latestRegistration.status === 'COMPLETED' ? 'success' : 'neutral'">
+            {{ workspace.latestRegistration.status === 'WAITING' ? '待就诊' : workspace.latestRegistration.status === 'COMPLETED' ? '已完成' : workspace.latestRegistration.status }}
+          </StatusChip>
+        </div>
       </div>
-      <span class="status-chip" :data-tone="workspace.activeTone">
-        <span class="chip-dot" />
-        <span>{{ workspace.displayName }}</span>
-      </span>
-    </div>
+    </SectionCard>
 
-    <div class="workspace-metrics">
-      <article class="metric workspace-metric">
-        <div class="card-head">
-          <h3>当前分诊</h3>
-          <ScanSearch :size="18" />
-        </div>
-        <div class="metric-value">{{ workspace.triageResult ? '已生成' : '待分诊' }}</div>
-        <p>{{ workspace.triageResult?.recommendedDept || '输入主诉后即可生成推荐科室' }}</p>
-      </article>
+    <EmptyState v-else icon="calendar" title="暂无挂号记录" description="完成分诊后可在这里查看和操作挂号" action-label="去分诊" @action="$router.push('/patient/triage')" />
 
-      <article class="metric workspace-metric">
-        <div class="card-head">
-          <h3>当前挂号</h3>
-          <Ticket :size="18" />
+    <SectionCard v-if="workspace.latestTriage" title="最近分诊结果">
+      <div class="space-y-2 text-sm">
+        <div>
+          <span class="text-text-secondary">主诉</span>
+          <p class="mt-0.5 text-text-main">{{ workspace.truncate(workspace.latestTriage.chiefComplaint, 100) }}</p>
         </div>
-        <div class="metric-value">{{ workspace.latestRegistration?.status || 'NONE' }}</div>
-        <p>{{ workspace.latestRegistration ? `${workspace.latestRegistration.doctorName || '未选择医生'} / ${workspace.latestRegistration.departmentName || '未选择科室'}` : '暂无挂号记录' }}</p>
-      </article>
-
-      <article class="metric workspace-metric">
-        <div class="card-head">
-          <h3>待处理</h3>
-          <Stethoscope :size="18" />
+        <div class="flex justify-between">
+          <span class="text-text-secondary">推荐科室</span>
+          <span class="font-medium text-brand">{{ workspace.latestTriage.recommendedDept }}</span>
         </div>
-        <div class="metric-value">{{ workspace.waitingRegistrations.length }}</div>
-        <p>未就诊的挂号可以直接取消或重新选择号源。</p>
-      </article>
-
-      <article class="metric workspace-metric">
-        <div class="card-head">
-          <h3>最近更新</h3>
-          <CalendarDays :size="18" />
-        </div>
-        <div class="metric-value">{{ workspace.formatDateTime(workspace.registrations[0]?.registrationTime) }}</div>
-        <p>分诊、挂号和反馈会在这里持续同步。</p>
-      </article>
-    </div>
-
-    <div class="workspace-summary-grid">
-      <div class="mini-item">
-        <div class="mini-item-head">
-          <div class="mini-item-title">推荐科室</div>
-          <span class="pill" :data-tone="workspace.triageResult ? 'healthy' : 'loading'">
-            {{ workspace.triageResult ? '已生成' : '待输入' }}
-          </span>
-        </div>
-        <p class="mini-item-copy">{{ workspace.triageResult?.reason || '输入主诉后会给出本地规则分诊建议。' }}</p>
       </div>
+    </SectionCard>
 
-      <div class="mini-item">
-        <div class="mini-item-head">
-          <div class="mini-item-title">我的病历</div>
-          <span class="pill">{{ workspace.medicalRecords.length }}</span>
-        </div>
-        <p class="mini-item-copy">可查看最近就诊记录、处方和审核结果。</p>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-brand">{{ workspace.waitingRegistrations.length }}</div>
+        <div class="text-xs text-text-secondary mt-1">待就诊</div>
       </div>
-
-      <div class="mini-item">
-        <div class="mini-item-head">
-          <div class="mini-item-title">完成就诊</div>
-          <span class="pill" data-tone="healthy">{{ workspace.completedRegistrations.length }}</span>
-        </div>
-        <p class="mini-item-copy">反馈入口和历史数据都在这个工作区里。</p>
+      <div class="card text-center">
+        <div class="text-2xl font-bold text-success">{{ workspace.completedRegistrations.length }}</div>
+        <div class="text-xs text-text-secondary mt-1">已完成</div>
       </div>
     </div>
-
-    <div class="action-row">
-      <button class="button-secondary" type="button" @click="workspace.setActivePatientPanel('triage')">
-        <ScanSearch :size="16" />
-        <span>去分诊</span>
-      </button>
-      <button class="button-secondary" type="button" @click="workspace.setActivePatientPanel('registration')">
-        <Ticket :size="16" />
-        <span>去挂号</span>
-      </button>
-      <button class="button-secondary" type="button" @click="workspace.setActivePatientPanel('records')">
-        <FileText :size="16" />
-        <span>看病历</span>
-      </button>
-      <button class="button-ghost" type="button" @click="workspace.setActivePatientPanel('history')">
-        <CalendarDays :size="16" />
-        <span>看历史</span>
-      </button>
-    </div>
-  </section>
+  </div>
 </template>

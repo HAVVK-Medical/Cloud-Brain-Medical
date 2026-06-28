@@ -168,7 +168,7 @@ export const useAuthStore = defineStore('auth', {
         return response;
       } catch (error) {
         this.degraded = true;
-        this.error = resolveUiErrorMessage(error, '鐧诲綍宸茶繃鏈燂紝璇烽噸鏂扮櫥褰?');
+        this.error = resolveUiErrorMessage(error, '登录已过期，请重新登录');
         this.clearSession();
         throw error;
       }

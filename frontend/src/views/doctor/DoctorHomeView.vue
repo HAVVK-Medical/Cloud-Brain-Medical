@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import {
-  ClipboardList,
-  BellRing,
-  RefreshCw,
+  LayoutDashboard,
   Stethoscope,
-  UserRound,
+  Clock,
+  CalendarDays,
+  RefreshCw,
 } from 'lucide-vue-next';
+import SideNav from '@/components/layout/SideNav.vue';
+import StatusChip from '@/components/shared/StatusChip.vue';
+import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
 
 import {
   beginConsultation,
@@ -35,10 +38,6 @@ import {
   submitPrescription,
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
-import DoctorConsultationPanel from '@/views/doctor/panels/DoctorConsultationPanel.vue';
-import DoctorHistoryPanel from '@/views/doctor/panels/DoctorHistoryPanel.vue';
-import DoctorOverviewPanel from '@/views/doctor/panels/DoctorOverviewPanel.vue';
-import DoctorSchedulePanel from '@/views/doctor/panels/DoctorSchedulePanel.vue';
 import type {
   AiUsageStats,
   ConsultationWorkspace,
@@ -97,8 +96,11 @@ const itemSeed = ref(1);
 const savingRecord = ref(false);
 const generatingRecord = ref(false);
 const diagnosingRecord = ref(false);
+const recordDegraded = ref(false);
+const diagnosisDegraded = ref(false);
 const reviewingPrescription = ref(false);
 const submittingPrescription = ref(false);
+const showPrescriptionConfirm = ref(false);
 const startingConsultation = ref(false);
 const completingConsultation = ref(false);
 const notificationLoading = ref(false);
@@ -107,6 +109,9 @@ const notificationSocketState = ref<'idle' | 'connecting' | 'connected' | 'close
 const streamText = ref('');
 const activeStreamSessionId = ref<string | null>(null);
 let notificationSocket: WebSocket | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempt = 0;
+const MAX_RECONNECT_DELAY = 30_000;
 
 const consultationForm = reactive({
   conversationText: '',
@@ -137,27 +142,6 @@ const selectedRegistration = computed<RegistrationSummary | null>(() => {
 const overviewTone = computed(() => (error.value ? 'danger' : loading.value ? 'loading' : 'healthy'));
 const workspaceTone = computed(() => (workspaceLoading.value ? 'loading' : workspace.value ? 'healthy' : 'neutral'));
 const unreadNotificationCount = computed(() => notifications.value.filter((item) => item.read !== true).length);
-const doctorPanels = [
-  { id: 'overview', label: '总览' },
-  { id: 'consultation', label: '接诊' },
-  { id: 'history', label: '历史' },
-  { id: 'schedule', label: '排班' },
-] as const;
-
-const activeDoctorPanel = ref<(typeof doctorPanels)[number]['id']>('overview');
-const doctorPanelComponent = computed(() => {
-  switch (activeDoctorPanel.value) {
-    case 'consultation':
-      return DoctorConsultationPanel;
-    case 'history':
-      return DoctorHistoryPanel;
-    case 'schedule':
-      return DoctorSchedulePanel;
-    default:
-      return DoctorOverviewPanel;
-  }
-});
-
 const filteredPrescriptions = computed(() => {
   const keyword = drugSearch.value.trim().toLowerCase();
   if (!keyword) {
@@ -205,6 +189,8 @@ const doctorWorkspace = reactive({
   savingRecord,
   generatingRecord,
   diagnosingRecord,
+  recordDegraded,
+  diagnosisDegraded,
   reviewingPrescription,
   submittingPrescription,
   startingConsultation,
@@ -222,8 +208,6 @@ const doctorWorkspace = reactive({
   overviewTone,
   workspaceTone,
   unreadNotificationCount,
-  doctorPanels,
-  activeDoctorPanel,
   filteredPrescriptions,
   formatDateTime,
   formatDate,
@@ -255,12 +239,12 @@ const doctorWorkspace = reactive({
   startAiStream,
   saveCurrentMedicalRecord,
   reviewCurrentPrescription,
+  requestSubmitPrescription,
   submitCurrentPrescription,
+  cancelPrescriptionSubmit,
+  showPrescriptionConfirm,
   ackNotification,
   completeSelectedConsultation,
-  setActiveDoctorPanel: (panel: (typeof doctorPanels)[number]['id']) => {
-    activeDoctorPanel.value = panel;
-  },
 });
 
 function createEmptyItem(): PrescriptionDraftItem {
@@ -334,23 +318,44 @@ function applyMedicalRecordDraft(draft: MedicalRecordSummary) {
     docNote: draft.docNote || recordForm.docNote,
     aiGenerated: draft.aiGenerated ?? true,
   });
+  recordDegraded.value = draft.degraded ?? false;
   consultationForm.diagnosisDirection = draft.preliminaryDiagnosis || consultationForm.diagnosisDirection;
 }
 
 function applyDiagnosisResult(result: DiagnosisSuggestionResponse) {
   diagnosisSuggestion.value = result;
+  diagnosisDegraded.value = result.degraded ?? false;
   recordForm.preliminaryDiagnosis = result.suggestedDiagnoses.split('\n')[0] || recordForm.preliminaryDiagnosis;
 }
 
+function resetPerPatientState() {
+  // Cancel any in-flight SSE stream for the previous patient
+  if (activeStreamSessionId.value) {
+    try {
+      cancelAiStreamSession(activeStreamSessionId.value).catch(() => {});
+    } catch {
+      // stream may already have ended
+    }
+    activeStreamSessionId.value = null;
+  }
+  streamText.value = '';
+  recordDegraded.value = false;
+  diagnosisDegraded.value = false;
+
+  Object.assign(recordForm, emptyRecordForm());
+  consultationForm.conversationText = '';
+  consultationForm.diagnosisDirection = '';
+  manualConfirmation.value = '医生已完成本地规则审方并确认。';
+  diagnosisSuggestion.value = null;
+  reviewResult.value = null;
+  prescriptionItems.value = [createEmptyItem()];
+}
+
 function syncFormsFromWorkspace(snapshot: ConsultationWorkspace | null) {
+  // Always reset per-patient transient state first
+  resetPerPatientState();
+
   if (!snapshot) {
-    Object.assign(recordForm, emptyRecordForm());
-    consultationForm.conversationText = '';
-    consultationForm.diagnosisDirection = '';
-    manualConfirmation.value = '医生已完成本地规则审方并确认。';
-    diagnosisSuggestion.value = null;
-    reviewResult.value = null;
-    prescriptionItems.value = [createEmptyItem()];
     return;
   }
 
@@ -438,14 +443,32 @@ function upsertNotification(notification: NotificationRecordSummary) {
   ].slice(0, 20);
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), MAX_RECONNECT_DELAY);
+  reconnectAttempt++;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (notificationSocketState.value !== 'connected') {
+      connectNotificationSocket();
+    }
+  }, delay);
+}
+
 function connectNotificationSocket() {
-  if (!authStore.token || notificationSocket) {
+  if (!authStore.token) {
+    return;
+  }
+  if (notificationSocket && notificationSocket.readyState === WebSocket.OPEN) {
     return;
   }
   notificationSocketState.value = 'connecting';
   notificationSocket = new WebSocket(buildWsUrl('/ws/notifications', authStore.token));
   notificationSocket.onopen = () => {
     notificationSocketState.value = 'connected';
+    reconnectAttempt = 0;
   };
   notificationSocket.onmessage = (event) => {
     try {
@@ -461,13 +484,18 @@ function connectNotificationSocket() {
   notificationSocket.onclose = () => {
     notificationSocket = null;
     notificationSocketState.value = 'closed';
+    scheduleReconnect();
   };
   notificationSocket.onerror = () => {
-    notificationSocketState.value = 'closed';
+    notificationSocket?.close();
   };
 }
 
 async function closeRealtimeChannels() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   if (activeStreamSessionId.value) {
     try {
       await cancelAiStreamSession(activeStreamSessionId.value);
@@ -665,10 +693,13 @@ async function startAiStream(taskType: 'MEDICAL_RECORD' | 'DIAGNOSIS') {
     throw new Error('event source unsupported');
   }
 
+  // Capture the registration ID at stream start to guard against patient switches
+  const streamRegistrationId = selectedRegistrationId.value;
+
   streamText.value = '';
   const session = await createAiStreamSession({
     taskType,
-    registrationId: selectedRegistrationId.value,
+    registrationId: streamRegistrationId,
     conversationText: consultationForm.conversationText.trim(),
     diagnosisDirection: consultationForm.diagnosisDirection.trim() || null,
   });
@@ -684,11 +715,15 @@ async function startAiStream(taskType: 'MEDICAL_RECORD' | 'DIAGNOSIS') {
       resolve();
     };
 
+    // Guard: only apply chunk text if the registration hasn't changed
     source.addEventListener('chunk', (event) => {
+      if (selectedRegistrationId.value !== streamRegistrationId) return;
       const payload = parseSsePayload<{ text?: string }>(event.data);
       streamText.value += payload?.text ?? event.data;
     });
+    // Guard: only apply results if the registration hasn't changed
     source.addEventListener('result', (event) => {
+      if (selectedRegistrationId.value !== streamRegistrationId) return;
       if (taskType === 'MEDICAL_RECORD') {
         const payload = parseSsePayload<MedicalRecordSummary>(event.data);
         if (payload) applyMedicalRecordDraft(payload);
@@ -768,9 +803,23 @@ async function reviewCurrentPrescription() {
   }
 }
 
-async function submitCurrentPrescription() {
+function requestSubmitPrescription() {
   if (!selectedRegistrationId.value || !reviewResult.value?.reviewId) {
     error.value = '请先完成审方';
+    return;
+  }
+  const items = buildPrescriptionPayload();
+  if (!items.length) {
+    error.value = '请先至少添加一条处方项目';
+    return;
+  }
+  showPrescriptionConfirm.value = true;
+}
+
+async function submitCurrentPrescription() {
+  showPrescriptionConfirm.value = false;
+
+  if (!selectedRegistrationId.value || !reviewResult.value?.reviewId) {
     return;
   }
 
@@ -799,6 +848,10 @@ async function submitCurrentPrescription() {
   } finally {
     submittingPrescription.value = false;
   }
+}
+
+function cancelPrescriptionSubmit() {
+  showPrescriptionConfirm.value = false;
 }
 
 async function ackNotification(id: number) {
@@ -846,62 +899,42 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page">
-    <div class="band workspace-shell">
-      <div class="band-header">
-        <div>
-          <h2 class="band-title">医生工作台</h2>
-          <p class="band-copy">接诊、病历、审方和历史都收在一个工作区里，切换时不再堆在同一屏。</p>
-        </div>
-        <span class="status-chip" :data-tone="overviewTone">
-          <span class="chip-dot" />
-          <span>{{ doctor?.name || authStore.sessionLabel }}</span>
-        </span>
-      </div>
+  <div class="flex flex-1 min-h-0">
+    <SideNav
+      title="医生工作台"
+      :subtitle="doctor?.name || authStore.sessionLabel"
+      :items="[
+        { id: 'overview', label: '总览', path: '/doctor/overview', icon: LayoutDashboard },
+        { id: 'consultation', label: '接诊', path: '/doctor/consultation', icon: Stethoscope },
+        { id: 'history', label: '历史', path: '/doctor/history', icon: Clock },
+        { id: 'schedule', label: '排班', path: '/doctor/schedule', icon: CalendarDays },
+      ]"
+    />
 
-      <div class="toolbar workspace-topline">
-        <span class="pill">
-          <Stethoscope :size="14" />
-          <span>{{ doctor?.departmentName || '未分科' }}</span>
-        </span>
-        <span class="pill" :data-tone="workspaceTone">
-          <ClipboardList :size="14" />
-          <span>{{ workspaceLoading ? '工作区加载中' : workspace ? '工作区已就绪' : '未打开工作区' }}</span>
-        </span>
-        <span class="pill">
-          <UserRound :size="14" />
-          <span>{{ selectedRegistration?.patientName || '未选中接诊' }}</span>
-        </span>
-        <span class="pill" :data-tone="selectedRegistration?.status === 'WAITING' ? 'loading' : 'healthy'">
-          <ClipboardList :size="14" />
-          <span>{{ selectedRegistration?.status || '空闲' }}</span>
-        </span>
-        <span class="pill" :data-tone="notificationSocketState === 'connected' ? 'healthy' : 'loading'">
-          <BellRing :size="14" />
-          <span>WS {{ notificationSocketState }}</span>
-        </span>
-        <button class="button-ghost" type="button" @click="refreshAll" :disabled="loading">
-          <RefreshCw :size="16" :class="{ spinning: loading }" />
-          <span>刷新</span>
+    <div class="flex-1 overflow-y-auto p-6">
+      <p v-if="error" class="mb-4 p-3 rounded-md bg-red-50 text-danger text-sm">{{ error }}</p>
+
+      <!-- Topline stats -->
+      <div class="flex items-center gap-3 mb-6 flex-wrap">
+        <StatusChip :tone="selectedRegistration?.status === 'WAITING' ? 'info' : 'success'">
+          {{ selectedRegistration?.patientName || '未选中患者' }}
+        </StatusChip>
+        <StatusChip :tone="notificationSocketState === 'connected' ? 'success' : 'neutral'" :dot="true">
+          通知 {{ notificationSocketState === 'connected' ? '已连接' : '未连接' }}
+        </StatusChip>
+        <span class="flex-1" />
+        <button class="btn-ghost" type="button" @click="refreshAll" :disabled="loading">
+          <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
+          <span>{{ loading ? '加载中' : '刷新' }}</span>
         </button>
       </div>
 
-      <p class="auth-error" v-if="error">{{ error }}</p>
-
-      <div class="segmented workspace-tabs">
-        <button
-          v-for="panel in doctorPanels"
-          :key="panel.id"
-          type="button"
-          class="segment"
-          :class="{ active: activeDoctorPanel === panel.id }"
-          @click="activeDoctorPanel = panel.id"
-        >
-          <span>{{ panel.label }}</span>
-        </button>
-      </div>
-
-      <component :is="doctorPanelComponent" :workspace="doctorWorkspace" />
+      <RouterView v-slot="{ Component: PanelComp }">
+        <Suspense>
+          <component :is="PanelComp" :workspace="doctorWorkspace" v-if="PanelComp" />
+        </Suspense>
+      </RouterView>
     </div>
-  </section>
+  </div>
+  <AiChatLauncher role="doctor" />
 </template>

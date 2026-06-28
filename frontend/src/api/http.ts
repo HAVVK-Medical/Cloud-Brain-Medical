@@ -70,7 +70,7 @@ http.interceptors.response.use(
 
       window.localStorage.removeItem(AUTH_STORAGE_KEY);
       if (window.location.pathname !== '/login') {
-        window.location.assign('/login');
+        window.location.assign('/login?reason=expired');
       }
     }
 

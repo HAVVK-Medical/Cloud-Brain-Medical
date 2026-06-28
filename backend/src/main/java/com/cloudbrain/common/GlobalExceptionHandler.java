@@ -30,6 +30,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception exception) {
-        return Result.failure(HttpStatus.INTERNAL_SERVER_ERROR.value(), exception.getMessage() == null ? "internal server error" : exception.getMessage());
+        return Result.failure(HttpStatus.INTERNAL_SERVER_ERROR.value(), "internal server error");
     }
 }

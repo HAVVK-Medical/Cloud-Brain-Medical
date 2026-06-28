@@ -75,6 +75,9 @@ export type TriageResponse = {
   reason: string;
   callStatus: string;
   recommendationSource: string;
+  aiRecommendedDepartmentId: number | null;
+  aiRecommendedDept: string | null;
+  degraded: boolean;
 };
 
 export type RegistrationCreateRequest = {
@@ -145,6 +148,7 @@ export type MedicalRecordSummary = {
   aiGenerated: boolean | null;
   version: number | null;
   createdAt: string | null;
+  degraded: boolean;
 };
 
 export type DiagnosisSuggestionRequest = {
@@ -160,6 +164,7 @@ export type DiagnosisSuggestionResponse = {
   suggestedExamItems: string;
   adoptionStatus: string;
   summary: string;
+  degraded: boolean;
 };
 
 export type PrescriptionItemRequest = {

@@ -1,0 +1,119 @@
+/* AI Global Interaction Styles */
+
+/* All AI-generated content gets a light blue accent */
+.ai-content {
+  background: #f0f7ff;
+  border-left: 3px solid var(--primary);
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin: 8px 0;
+  position: relative;
+}
+
+/* AI badge */
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Degraded badge */
+.degraded-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #fff3cd;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Typewriter cursor animation */
+@keyframes ai-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.ai-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: var(--primary);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: ai-cursor-blink 1s step-end infinite;
+}
+
+/* Skeleton loading pulse */
+@keyframes ai-pulse {
+  0%, 100% { opacity: .4; }
+  50% { opacity: .8; }
+}
+
+.ai-skeleton {
+  background: var(--surface-soft);
+  border-radius: 6px;
+  animation: ai-pulse 1.5s ease-in-out infinite;
+  min-height: 20px;
+  margin: 4px 0;
+}
+
+/* Degraded notice bar */
+.ai-degraded-notice {
+  padding: 8px 14px;
+  background: #fffbea;
+  border: 1px solid #f0d77b;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Feedback buttons */
+.ai-feedback {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.ai-feedback__btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: .5;
+  transition: opacity .2s;
+}
+
+.ai-feedback__btn:hover { opacity: 1; }
+
+/* Copy button */
+.ai-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .2s;
+  color: var(--muted);
+}
+
+.ai-content:hover .ai-copy-btn { opacity: 1; }
