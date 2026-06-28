@@ -108,7 +108,7 @@ public class AIInvocationService {
                     "主诉：" + safe.getOrDefault("chiefComplaint", ""),
                     "",
                     "请按以下格式输出（每行一个键值对，用英文冒号分隔）：",
-                    "recommendedDepartment: 推荐科室全称（如：心内科、神经内科、骨科、皮肤科、内科）",
+                    "recommendedDepartment: 推荐科室全称（如：心内科、神经内科、骨科、皮肤科、呼吸内科、消化内科、内分泌科、耳鼻喉科、眼科、泌尿外科、妇科、儿科、内科）",
                     "reason: 推荐理由（1-2句话）");
             case "MEDICAL_RECORD" -> String.join("\n",
                     "请根据问诊内容生成结构化病历草稿，按以下格式输出（每行一个键值对，英文冒号分隔）：",

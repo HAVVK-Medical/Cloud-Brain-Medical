@@ -1,4 +1,4 @@
-package com.cloudbrain.application.workflow;
+﻿package com.cloudbrain.application.workflow;
 
 import com.cloudbrain.application.ai.AIInvocationService;
 import com.cloudbrain.application.ai.AIModels;
@@ -6,10 +6,13 @@ import com.cloudbrain.application.ai.AITextParser;
 import com.cloudbrain.common.exception.ApiException;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiUsageBucket;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiUsageStats;
+import com.cloudbrain.dto.workflow.WorkflowDtos.ConversationTriageConfirmRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.ConsultationWorkspace;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DashboardOverview;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DashboardTrendPoint;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DepartmentOption;
+import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionAdoptRequest;
+import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionIgnoreRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionResponse;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DoctorOption;
@@ -302,7 +305,7 @@ public class WorkflowService {
         String chiefComplaint = request.chiefComplaint().trim();
 
         // Local rule: keyword-based department pick
-        DepartmentEntity localDepartment = pickDepartment(chiefComplaint);
+        DepartmentEntity localDepartment = pickExpandedDepartment(chiefComplaint);
         Map<Long, DepartmentEntity> departments = departmentsById();
         List<DoctorOption> localDoctors = doctorRepository
                 .findByDepartmentIdAndStatusOrderByNameAsc(localDepartment.getId(), ACTIVE)
@@ -333,17 +336,7 @@ public class WorkflowService {
         String aiDeptName = AITextParser.firstNonBlank(aiParsed, "recommendedDepartment", aiDeptCode);
 
         // Determine AI-recommended department
-        DepartmentEntity aiDepartment = null;
-        if (aiDeptCode != null) {
-            aiDepartment = departmentRepository.findByCode(aiDeptCode).orElse(null);
-        }
-        if (aiDepartment == null && aiDeptName != null) {
-            aiDepartment = departmentRepository.findAll().stream()
-                    .filter(d -> ACTIVE.equals(d.getStatus())
-                            && (d.getName().equals(aiDeptName) || d.getCode().equalsIgnoreCase(aiDeptName)))
-                    .findFirst()
-                    .orElse(null);
-        }
+        DepartmentEntity aiDepartment = resolveActiveDepartment(aiDeptCode, aiDeptName).orElse(null);
 
         // Use AI recommendation if available and valid; otherwise fall back to local rule
         DepartmentEntity finalDepartment = (aiDepartment != null && ACTIVE.equals(aiDepartment.getStatus()))
@@ -397,6 +390,68 @@ public class WorkflowService {
                 aiDepartment != null ? aiDepartment.getId() : null,
                 aiDepartment != null ? aiDepartment.getName() : null,
                 degraded
+        );
+    }
+
+    @Transactional
+    public TriageResponse confirmConversationTriage(ActorContext actorContext, ConversationTriageConfirmRequest request) {
+        Long patientId = requirePatient(actorContext);
+        long started = System.currentTimeMillis();
+        String chiefComplaint = request.chiefComplaint().trim();
+
+        DepartmentEntity localDepartment = pickExpandedDepartment(chiefComplaint);
+        DepartmentEntity finalDepartment = resolveActiveDepartment(request.departmentCode(), request.department())
+                .orElse(localDepartment);
+        Map<Long, DepartmentEntity> departments = departmentsById();
+        List<DoctorOption> finalDoctors = doctorRepository
+                .findByDepartmentIdAndStatusOrderByNameAsc(finalDepartment.getId(), ACTIVE)
+                .stream()
+                .map(doctor -> toDoctorOption(doctor, departments.get(doctor.getDepartmentId())))
+                .toList();
+        List<ScheduleOption> finalSchedules = listAvailableSchedules(finalDepartment.getId());
+
+        String reason = firstNonBlank(
+                request.reason(),
+                "鏍规嵁 AI 瀵硅瘽寮忛棶璇婄粨鏋滐紝寤鸿浼樺厛鍓嶅線" + finalDepartment.getName() + "銆?
+        );
+        if (request.urgencyLevel() != null && !request.urgencyLevel().isBlank()) {
+            reason = reason + "\n绱ф€ョ▼搴︼細" + request.urgencyLevel().trim();
+        }
+
+        AICallRecordEntity callRecord = aiCallRecord("TRIAGE", actorContext, chiefComplaint, reason, started);
+        callRecord.setProvider("TRIAGE_CONVERSATION");
+        callRecord.setModelName("conversation-triage");
+        callRecord.setConfigVersion("conversation-v1");
+        callRecord.setPromptVersion("conversation-v1");
+        callRecord = aiCallRecordRepository.save(callRecord);
+
+        TriageRecordEntity triageRecord = new TriageRecordEntity();
+        triageRecord.setPatientId(patientId);
+        triageRecord.setChiefComplaint(chiefComplaint);
+        triageRecord.setRecommendedDept(finalDepartment.getName());
+        triageRecord.setRecommendedDoctors(finalDoctors.stream().map(DoctorOption::name).collect(Collectors.joining(", ")));
+        triageRecord.setAiResponseRaw(reason);
+        triageRecord.setCallStatus("COMPLETED");
+        triageRecord.setRecommendationSource("TRIAGE_CONVERSATION");
+        triageRecord.setAiCallRecordId(callRecord.getId());
+        triageRecord = triageRecordRepository.save(triageRecord);
+
+        callRecord.setBusinessRecordId(triageRecord.getId());
+        aiCallRecordRepository.save(callRecord);
+
+        return new TriageResponse(
+                triageRecord.getId(),
+                chiefComplaint,
+                finalDepartment.getId(),
+                finalDepartment.getName(),
+                finalDoctors,
+                finalSchedules,
+                reason,
+                triageRecord.getCallStatus(),
+                triageRecord.getRecommendationSource(),
+                finalDepartment.getId(),
+                finalDepartment.getName(),
+                false
         );
     }
 
@@ -598,13 +653,13 @@ public class WorkflowService {
         draft.setRegistrationId(registration.getId());
         draft.setChiefComplaint(firstNonBlank(aiDraft.chiefComplaint(), chief));
         draft.setPresentIllness(firstNonBlank(aiDraft.presentIllness(), request.conversationText()));
-        draft.setPastHistory(firstNonBlank(aiDraft.pastHistory(), firstNonBlank(patient.getMedicalHistory(), "未见特殊既往史。")));
-        draft.setPhysicalExam(firstNonBlank(aiDraft.physicalExam(), "生命体征平稳，建议医生结合查体补充。"));
+        draft.setPastHistory(firstNonBlank(aiDraft.pastHistory(), firstNonBlank(patient.getMedicalHistory(), "鏈鐗规畩鏃㈠線鍙层€?)));
+        draft.setPhysicalExam(firstNonBlank(aiDraft.physicalExam(), "鐢熷懡浣撳緛骞崇ǔ锛屽缓璁尰鐢熺粨鍚堟煡浣撹ˉ鍏呫€?));
         draft.setPreliminaryDiagnosis(diagnosis);
         draft.setTreatmentPlan(firstNonBlank(aiDraft.treatmentPlan(), buildTreatmentPlan(diagnosis)));
         draft.setConversationText(request.conversationText());
         draft.setAiGenerated(true);
-        draft.setDocNote(firstNonBlank(aiDraft.docNote(), "本地模拟 AI 已根据问诊文本生成结构化病历草稿，请医生确认。"));
+        draft.setDocNote(firstNonBlank(aiDraft.docNote(), "鏈湴妯℃嫙 AI 宸叉牴鎹棶璇婃枃鏈敓鎴愮粨鏋勫寲鐥呭巻鑽夌锛岃鍖荤敓纭銆?));
         draft.setVersion(0);
 
         String output = draft.getChiefComplaint() + " | " + draft.getPreliminaryDiagnosis();
@@ -624,12 +679,12 @@ public class WorkflowService {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
         if (!List.of(IN_CONSULTATION, MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED).contains(registration.getStatus())) {
-            String currentStatus = registration.getStatus() == null ? "未知" : registration.getStatus();
+            String currentStatus = registration.getStatus() == null ? "鏈煡" : registration.getStatus();
             String hint = switch (currentStatus) {
-                case "WAITING" -> "请先点击「开始接诊」后再保存病历";
-                case "COMPLETED" -> "该就诊已完成，无法再保存病历";
-                case "CANCELLED" -> "该挂号已取消，无法保存病历";
-                default -> "当前就诊状态(" + currentStatus + ")不允许保存病历";
+                case "WAITING" -> "璇峰厛鐐瑰嚮銆屽紑濮嬫帴璇娿€嶅悗鍐嶄繚瀛樼梾鍘?;
+                case "COMPLETED" -> "璇ュ氨璇婂凡瀹屾垚锛屾棤娉曞啀淇濆瓨鐥呭巻";
+                case "CANCELLED" -> "璇ユ寕鍙峰凡鍙栨秷锛屾棤娉曚繚瀛樼梾鍘?;
+                default -> "褰撳墠灏辫瘖鐘舵€?" + currentStatus + ")涓嶅厑璁镐繚瀛樼梾鍘?;
             };
             throw conflict(hint);
         }
@@ -649,12 +704,12 @@ public class WorkflowService {
         record.setPatientId(registration.getPatientId());
         record.setDoctorId(doctorId);
         record.setRegistrationId(registration.getId());
-        record.setChiefComplaint(firstNonBlank(request.chiefComplaint(), "未填写"));
+        record.setChiefComplaint(firstNonBlank(request.chiefComplaint(), "鏈～鍐?));
         record.setPresentIllness(firstNonBlank(request.presentIllness(), request.conversationText()));
-        record.setPastHistory(firstNonBlank(request.pastHistory(), "未填写"));
-        record.setPhysicalExam(firstNonBlank(request.physicalExam(), "未填写"));
-        record.setPreliminaryDiagnosis(firstNonBlank(request.preliminaryDiagnosis(), "待明确"));
-        record.setTreatmentPlan(firstNonBlank(request.treatmentPlan(), "遵医嘱治疗，必要时复诊。"));
+        record.setPastHistory(firstNonBlank(request.pastHistory(), "鏈～鍐?));
+        record.setPhysicalExam(firstNonBlank(request.physicalExam(), "鏈～鍐?));
+        record.setPreliminaryDiagnosis(firstNonBlank(request.preliminaryDiagnosis(), "寰呮槑纭?));
+        record.setTreatmentPlan(firstNonBlank(request.treatmentPlan(), "閬靛尰鍢辨不鐤楋紝蹇呰鏃跺璇娿€?));
         record.setConversationText(request.conversationText());
         record.setAiGenerated(Boolean.TRUE.equals(request.aiGenerated()));
         record.setDocNote(request.docNote());
@@ -752,9 +807,9 @@ public class WorkflowService {
                 variables,
                 request.attachments(),
                 String.join("\n",
-                        "suggestedDiagnoses: " + fallbackDiagnosis + "；鉴别：焦虑相关不适、消化系统不适、呼吸系统感染。",
+                        "suggestedDiagnoses: " + fallbackDiagnosis + "锛涢壌鍒細鐒﹁檻鐩稿叧涓嶉€傘€佹秷鍖栫郴缁熶笉閫傘€佸懠鍚哥郴缁熸劅鏌撱€?,
                         "suggestedExamItems: " + suggestExamItems(fallbackDiagnosis),
-                        "summary: 本地规则根据关键词生成诊疗建议，供医生参考。",
+                        "summary: 鏈湴瑙勫垯鏍规嵁鍏抽敭璇嶇敓鎴愯瘖鐤楀缓璁紝渚涘尰鐢熷弬鑰冦€?,
                         "finalDiagnosisDirection: " + fallbackDiagnosis
                 ),
                 chunkConsumer != null,
@@ -766,7 +821,7 @@ public class WorkflowService {
         entity.setRegistrationId(registration.getId());
         entity.setPatientId(registration.getPatientId());
         entity.setDoctorId(doctorId);
-        entity.setSuggestedDiagnoses(firstNonBlank(AITextParser.firstNonBlank(parsed, "suggestedDiagnoses", null), diagnosis + "\n鉴别：焦虑相关不适、消化系统不适、呼吸系统感染。"));
+        entity.setSuggestedDiagnoses(firstNonBlank(AITextParser.firstNonBlank(parsed, "suggestedDiagnoses", null), diagnosis + "\n閴村埆锛氱劍铏戠浉鍏充笉閫傘€佹秷鍖栫郴缁熶笉閫傘€佸懠鍚哥郴缁熸劅鏌撱€?));
         entity.setSuggestedExamItems(firstNonBlank(AITextParser.firstNonBlank(parsed, "suggestedExamItems", null), suggestExamItems(diagnosis)));
         entity.setAdoptionStatus("SUGGESTED");
         entity.setFinalDiagnosisDirection(diagnosis);
@@ -790,9 +845,41 @@ public class WorkflowService {
                 entity.getSuggestedDiagnoses(),
                 entity.getSuggestedExamItems(),
                 entity.getAdoptionStatus(),
-                "本地规则根据关键词生成诊疗建议，供医生参考。",
+                "鏈湴瑙勫垯鏍规嵁鍏抽敭璇嶇敓鎴愯瘖鐤楀缓璁紝渚涘尰鐢熷弬鑰冦€?,
                 aiOutcome.meta().degraded()
         );
+    }
+
+    @Transactional
+    public DiagnosisSuggestionResponse adoptDiagnosisSuggestion(ActorContext actorContext,
+                                                               Long suggestionId,
+                                                               DiagnosisSuggestionAdoptRequest request) {
+        Long doctorId = requireDoctor(actorContext);
+        DiagnosisSuggestionRecordEntity entity = requireDoctorDiagnosisSuggestion(suggestionId, doctorId);
+        String finalDiagnosis = firstNonBlank(request.finalDiagnosis(), entity.getFinalDiagnosisDirection());
+        entity.setAdoptionStatus("ADOPTED");
+        entity.setFinalDiagnosisDirection(finalDiagnosis);
+        entity.setAdoptionDoctorId(doctorId);
+        entity.setAdoptionTime(LocalDateTime.now());
+        entity = diagnosisSuggestionRepository.save(entity);
+        return toDiagnosisSuggestionResponse(entity, "宸查噰绾宠瘖鏂缓璁€?, false);
+    }
+
+    @Transactional
+    public DiagnosisSuggestionResponse ignoreDiagnosisSuggestion(ActorContext actorContext,
+                                                                Long suggestionId,
+                                                                DiagnosisSuggestionIgnoreRequest request) {
+        Long doctorId = requireDoctor(actorContext);
+        DiagnosisSuggestionRecordEntity entity = requireDoctorDiagnosisSuggestion(suggestionId, doctorId);
+        entity.setAdoptionStatus("IGNORED");
+        entity.setAdoptionDoctorId(doctorId);
+        entity.setAdoptionTime(LocalDateTime.now());
+        String reason = request == null ? null : blankToNull(request.reason());
+        if (reason != null) {
+            entity.setFinalDiagnosisDirection(reason);
+        }
+        entity = diagnosisSuggestionRepository.save(entity);
+        return toDiagnosisSuggestionResponse(entity, "宸插拷鐣ヨ瘖鏂缓璁€?, false);
     }
 
     @Transactional
@@ -809,13 +896,14 @@ public class WorkflowService {
         if (!List.of(MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED, PRESCRIPTION_SUBMITTED).contains(registration.getStatus())) {
             throw conflict("please save medical record before prescription review");
         }
+        List<PrescriptionItemRequest> items = requirePrescriptionItems(request.items());
         long started = System.currentTimeMillis();
 
-        List<DrugEntity> drugs = request.items().stream()
+        List<DrugEntity> drugs = items.stream()
                 .map(item -> drugRepository.findByIdAndStatus(item.drugId(), ACTIVE)
                         .orElseThrow(() -> notFound("drug not found: " + item.drugId())))
                 .toList();
-        ReviewComputation review = computeReview(registration, request.items(), drugs);
+        ReviewComputation review = computeReview(registration, items, drugs);
         Map<String, String> variables = new LinkedHashMap<>();
         variables.put("riskLevel", review.riskLevel());
         variables.put("localRuleHits", review.localRuleHits());
@@ -856,7 +944,7 @@ public class WorkflowService {
         entity.setLlmSummary(firstNonBlank(AITextParser.firstNonBlank(reviewParsed, "llmSummary", null), review.summary()));
         entity.setLlmCallStatus(aiOutcome.meta().provider());
         entity.setAiCallRecordId(callRecord.getId());
-        entity.setPrescriptionSnapshotHash(hashItems(request.items()));
+        entity.setPrescriptionSnapshotHash(hashItems(items));
         entity.setReviewContextHash(hashContext(registration));
         entity.setBindStatus("UNBOUND");
         entity.setVersion(0);
@@ -868,26 +956,27 @@ public class WorkflowService {
 
         registration.setStatus(PRESCRIPTION_REVIEWED);
         registrationRepository.save(registration);
-        return toReviewResponse(entity, null, toItemSummariesFromRequest(request.items(), drugs));
+        return toReviewResponse(entity, null, toItemSummariesFromRequest(items, drugs));
     }
 
     @Transactional
     public PrescriptionSummary submitPrescription(ActorContext actorContext, PrescriptionSubmitRequest request) {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
+        List<PrescriptionItemRequest> items = requirePrescriptionItems(request.items());
         PrescriptionReviewEntity review = prescriptionReviewRepository.findByIdAndBindStatus(request.reviewId(), "UNBOUND")
                 .orElseThrow(() -> notFound("unbound review not found"));
         if (!Objects.equals(review.getRegistrationId(), registration.getId())) {
             throw conflict("review does not belong to this registration");
         }
-        String itemHash = hashItems(request.items());
+        String itemHash = hashItems(items);
         String contextHash = hashContext(registration);
         if (!Objects.equals(review.getPrescriptionSnapshotHash(), itemHash)
                 || !Objects.equals(review.getReviewContextHash(), contextHash)) {
             throw conflict("prescription changed after review, please review again");
         }
 
-        List<DrugEntity> drugs = request.items().stream()
+        List<DrugEntity> drugs = items.stream()
                 .map(item -> drugRepository.findByIdAndStatus(item.drugId(), ACTIVE)
                         .orElseThrow(() -> notFound("drug not found: " + item.drugId())))
                 .toList();
@@ -901,8 +990,8 @@ public class WorkflowService {
         prescription.setStatus("SUBMITTED");
         prescription = prescriptionRepository.save(prescription);
 
-        for (int i = 0; i < request.items().size(); i++) {
-            prescriptionItemRepository.save(toPrescriptionItem(prescription.getId(), request.items().get(i), drugs.get(i)));
+        for (int i = 0; i < items.size(); i++) {
+            prescriptionItemRepository.save(toPrescriptionItem(prescription.getId(), items.get(i), drugs.get(i)));
         }
 
         review.setPrescriptionId(prescription.getId());
@@ -931,6 +1020,19 @@ public class WorkflowService {
         return prescriptionRepository.findByDoctorIdOrderByCreatedAtDesc(doctorId).stream()
                 .map(this::toPrescriptionSummary)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PrescriptionSummary getPrescription(ActorContext actorContext, Long prescriptionId) {
+        PrescriptionEntity prescription = prescriptionRepository.findById(prescriptionId)
+                .orElseThrow(() -> notFound("prescription not found"));
+        if (actorContext == null
+                || !(actorContext.isAdmin()
+                || (actorContext.isPatient() && Objects.equals(prescription.getPatientId(), actorContext.patientId()))
+                || (actorContext.isDoctor() && Objects.equals(prescription.getDoctorId(), actorContext.doctorId())))) {
+            throw new ApiException(HttpStatus.FORBIDDEN.value(), "prescription permission required");
+        }
+        return toPrescriptionSummary(prescription);
     }
 
     @Transactional(readOnly = true)
@@ -1284,24 +1386,70 @@ public class WorkflowService {
         return actorContext.getRequiredDoctorId();
     }
 
-    private DepartmentEntity pickDepartment(String complaint) {
-        String normalized = complaint.toLowerCase(Locale.ROOT);
+    private DepartmentEntity pickExpandedDepartment(String complaint) {
+        String normalized = complaint == null ? "" : complaint.toLowerCase(Locale.ROOT);
         String code;
-        if (containsAny(normalized, "胸", "心", "气短", "心悸", "血压", "胸闷")) {
+        if (containsAny(normalized, "鑳哥棝", "鑳搁椃", "蹇冩偢", "蹇冩厡", "琛€鍘嬮珮", "楂樿鍘?, "琛€鍘嬪紓甯?, "蹇冪粸鐥?, "蹇冭“", "蹇冨緥澶卞父")) {
             code = "cardiology";
-        } else if (containsAny(normalized, "头", "眩", "晕", "抽搐", "癫痫", "中风", "失眠", "记忆", "帕金森", "偏瘫", "麻木")) {
+        } else if (containsAny(normalized, "澶寸棝", "鐪╂檿", "鎶芥悙", "鐧棲", "涓", "楹绘湪", "澶辩湢", "璁板繂", "甯曢噾妫?, "鑴戞", "鑴戝嚭琛€")) {
             code = "neurology";
-        } else if (containsAny(normalized, "骨", "关节", "腰痛", "腿痛", "扭伤", "颈椎", "腰椎", "骨折", "脱臼", "韧带")) {
+        } else if (containsAny(normalized, "楠ㄦ姌", "鍏宠妭鐥?, "鑵扮棝", "鑵拌吙鐥?, "鎵激", "棰堟", "鑴婃煴", "楠ㄧ棝", "杩愬姩鎹熶激", "鑲╃棝")) {
             code = "orthopedics";
-        } else if (containsAny(normalized, "皮疹", "过敏", "皮肤", "痒", "红肿", "痤疮", "湿疹", "荨麻疹", "银屑", "脱发", "斑")) {
+        } else if (containsAny(normalized, "鐨柟", "杩囨晱", "鐨偆", "鐦欑棐", "鐥ょ柈", "婀跨柟", "鑽ㄩ夯鐤?, "閾跺睉鐥?, "鐪熻弻鎰熸煋", "鑴卞彂")) {
             code = "dermatology";
+        } else if (containsAny(normalized, "鍎跨", "灏忓", "瀛╁瓙", "瀹濆疂", "濠村効", "鍎跨", "鐢熼暱鍙戣偛", "鐤嫍", "鍙戣偛杩熺紦")) {
+            code = "pediatrics";
+        } else if (containsAny(normalized, "鍜冲椊", "鍜崇棸", "姘旂煭", "鍠?, "鍠樻伅", "鍛煎惛鍥伴毦", "鑲虹値", "鎱㈤樆鑲?, "鏀皵绠?, "鍝枠")) {
+            code = "respiratory-medicine";
+        } else if (containsAny(normalized, "鑵圭棝", "鑵规郴", "鑵硅儉", "鍙嶉吀", "鑳冪棝", "鑳冭儉", "鎭跺績", "鍛曞悙", "渚胯", "榛戜究", "娑堝寲涓嶈壇")) {
+            code = "gastroenterology";
+        } else if (containsAny(normalized, "绯栧翱鐥?, "鐢茬姸鑵?, "琛€绯?, "琛€鑴?, "鑲ヨ儢", "澶氶ギ", "澶氬翱", "娑堢槮", "浠ｈ阿", "鍐呭垎娉?)) {
+            code = "endocrinology";
+        } else if (containsAny(normalized, "鑰抽福", "鍚姏涓嬮檷", "鑰崇棝", "榧诲", "娴佹稌", "鍜界棝", "澹伴煶鍢跺搼", "鍠夊挋鐥?, "榧荤鐐?, "鎵佹浣?)) {
+            code = "otolaryngology";
+        } else if (containsAny(normalized, "瑙嗗姏涓嬮檷", "瑙嗙墿妯＄硦", "鐪肩孩", "鐪肩棝", "骞茬溂", "娴佹唱", "缁撹啘鐐?, "鐧藉唴闅?, "闈掑厜鐪?)) {
+            code = "ophthalmology";
+        } else if (containsAny(normalized, "灏块", "灏挎€?, "灏跨棝", "琛€灏?, "鎺掑翱", "缁撶煶", "鍓嶅垪鑵?, "鑵伴吀", "鑲剧粸鐥?, "娉屽翱")) {
+            code = "urology";
+        } else if (containsAny(normalized, "鏈堢粡", "鐧藉甫", "闃撮亾", "鐩嗚厰", "濡囩", "濡婂", "鎬€瀛?, "瀛曚骇", "闃撮亾鍑鸿", "缁忔湡")) {
+            code = "gynecology";
         } else {
-            // All other internal medicine symptoms: respiratory, gastrointestinal, general
             code = "internal-medicine";
         }
         return departmentRepository.findByCode(code)
                 .or(() -> departmentRepository.findByStatusOrderByNameAsc(ACTIVE).stream().findFirst())
                 .orElseThrow(() -> notFound("no active department configured"));
+    }
+
+    private DepartmentEntity pickDepartment(String complaint) {
+        return pickExpandedDepartment(complaint);
+    }
+
+    private Optional<DepartmentEntity> resolveActiveDepartment(String code, String name) {
+        String normalizedCode = blankToNull(code);
+        if (normalizedCode != null) {
+            Optional<DepartmentEntity> byCode = departmentRepository.findByCode(normalizedCode)
+                    .filter(department -> ACTIVE.equals(department.getStatus()));
+            if (byCode.isPresent()) {
+                return byCode;
+            }
+        }
+
+        String normalizedName = blankToNull(name);
+        if (normalizedName == null) {
+            return Optional.empty();
+        }
+        List<DepartmentEntity> activeDepartments = departmentRepository.findByStatusOrderByNameAsc(ACTIVE);
+        Optional<DepartmentEntity> exactMatch = activeDepartments.stream()
+                .filter(department -> department.getName().equals(normalizedName)
+                        || department.getCode().equalsIgnoreCase(normalizedName))
+                .findFirst();
+        if (exactMatch.isPresent()) {
+            return exactMatch;
+        }
+        return activeDepartments.stream()
+                .filter(department -> normalizedName.contains(department.getName()))
+                .findFirst();
     }
 
     private boolean containsAny(String text, String... words) {
@@ -1314,10 +1462,10 @@ public class WorkflowService {
     }
 
     private String buildTriageReason(String complaint, DepartmentEntity department, List<DoctorOption> doctors) {
-        String doctorText = doctors.isEmpty() ? "暂无可推荐医生，请手动选择号源。" :
-                "推荐医生：" + doctors.stream().map(DoctorOption::name).collect(Collectors.joining("、")) + "。";
-        return "根据主诉“" + complaint + "”，本地分诊规则建议优先前往" + department.getName()
-                + "。理由：症状关键词与该科室常见就诊范围匹配。" + doctorText;
+        String doctorText = doctors.isEmpty() ? "鏆傛棤鍙帹鑽愬尰鐢燂紝璇锋墜鍔ㄩ€夋嫨鍙锋簮銆? :
+                "鎺ㄨ崘鍖荤敓锛? + doctors.stream().map(DoctorOption::name).collect(Collectors.joining("銆?)) + "銆?;
+        return "鏍规嵁涓昏瘔鈥? + complaint + "鈥濓紝鏈湴鍒嗚瘖瑙勫垯寤鸿浼樺厛鍓嶅線" + department.getName()
+                + "銆傜悊鐢憋細鐥囩姸鍏抽敭璇嶄笌璇ョ瀹ゅ父瑙佸氨璇婅寖鍥村尮閰嶃€? + doctorText;
     }
 
     private AIModels.AIExecutionOutcome<String> invokeAi(String taskType,
@@ -1373,11 +1521,11 @@ public class WorkflowService {
         return String.join("\n",
                 "chiefComplaint: " + firstNonBlank(chief, firstSentence(conversationText)),
                 "presentIllness: " + firstNonBlank(conversationText, ""),
-                "pastHistory: " + firstNonBlank(patient.getMedicalHistory(), "未见特殊既往史"),
-                "physicalExam: 生命体征平稳，建议医生结合查体补充。",
+                "pastHistory: " + firstNonBlank(patient.getMedicalHistory(), "鏈鐗规畩鏃㈠線鍙?),
+                "physicalExam: 鐢熷懡浣撳緛骞崇ǔ锛屽缓璁尰鐢熺粨鍚堟煡浣撹ˉ鍏呫€?,
                 "preliminaryDiagnosis: " + resolvedDiagnosis,
                 "treatmentPlan: " + buildTreatmentPlan(resolvedDiagnosis),
-                "docNote: 本地规则已生成病历草稿，请医生确认。"
+                "docNote: 鏈湴瑙勫垯宸茬敓鎴愮梾鍘嗚崏绋匡紝璇峰尰鐢熺‘璁ゃ€?
         );
     }
 
@@ -1416,43 +1564,43 @@ public class WorkflowService {
             PrescriptionItemRequest item = items.get(i);
             DrugEntity drug = drugs.get(i);
             if (!seen.add(item.drugId())) {
-                hits.add("重复用药：" + drug.getName() + " 在处方中出现多次。");
+                hits.add("閲嶅鐢ㄨ嵂锛? + drug.getName() + " 鍦ㄥ鏂逛腑鍑虹幇澶氭銆?);
                 risk = maxRisk(risk, "MEDIUM");
             }
             if (patient.getAllergyHistory() != null
-                    && !patient.getAllergyHistory().contains("无")
+                    && !patient.getAllergyHistory().contains("鏃?)
                     && drug.getContraindications() != null
                     && drug.getContraindications().contains(patient.getAllergyHistory())) {
-                hits.add("过敏风险：" + patient.getAllergyHistory() + " 与 " + drug.getName() + " 禁忌信息相关。");
+                hits.add("杩囨晱椋庨櫓锛? + patient.getAllergyHistory() + " 涓?" + drug.getName() + " 绂佸繉淇℃伅鐩稿叧銆?);
                 risk = maxRisk(risk, "HIGH");
             }
             if (item.quantity() != null && item.quantity() > 30) {
-                hits.add("数量偏高：" + drug.getName() + " 数量超过 30，请确认疗程。");
+                hits.add("鏁伴噺鍋忛珮锛? + drug.getName() + " 鏁伴噺瓒呰繃 30锛岃纭鐤楃▼銆?);
                 risk = maxRisk(risk, "MEDIUM");
             }
             if (item.dosage() != null && item.dosage().compareTo(new BigDecimal("2.00")) > 0) {
-                hits.add("剂量提醒：" + drug.getName() + " 单次剂量较高，请结合说明书。");
+                hits.add("鍓傞噺鎻愰啋锛? + drug.getName() + " 鍗曟鍓傞噺杈冮珮锛岃缁撳悎璇存槑涔︺€?);
                 risk = maxRisk(risk, "MEDIUM");
             }
         }
         for (PrescriptionRuleDefinitionEntity rule : ruleRepository.findByStatusOrderByRuleCodeAsc(ACTIVE)) {
             for (DrugEntity drug : drugs) {
                 if (rule.getApplicableDrugs() != null && rule.getApplicableDrugs().contains(drug.getName())) {
-                    hits.add(rule.getAlertMessage() == null ? "命中规则：" + rule.getRuleCode() : rule.getAlertMessage());
+                    hits.add(rule.getAlertMessage() == null ? "鍛戒腑瑙勫垯锛? + rule.getRuleCode() : rule.getAlertMessage());
                     risk = maxRisk(risk, firstNonBlank(rule.getRiskLevel(), "MEDIUM"));
                 }
             }
         }
         if (hits.isEmpty()) {
-            hits.add("未命中中高风险本地规则，仍需医生结合患者情况确认。");
+            hits.add("鏈懡涓腑楂橀闄╂湰鍦拌鍒欙紝浠嶉渶鍖荤敓缁撳悎鎮ｈ€呮儏鍐电‘璁ゃ€?);
         }
         String missing = medicalRecordRepository.findFirstByRegistrationIdOrderByVersionDesc(registration.getId()).isPresent()
                 ? ""
-                : "缺少已保存病历上下文";
+                : "缂哄皯宸蹭繚瀛樼梾鍘嗕笂涓嬫枃";
         String summary = switch (risk) {
-            case "HIGH" -> "本地规则判断存在高风险，建议调整处方或补充人工确认。";
-            case "MEDIUM" -> "本地规则判断存在中等风险，建议医生复核剂量、疗程或禁忌。";
-            default -> "本地规则未发现明显风险，建议常规复核后提交。";
+            case "HIGH" -> "鏈湴瑙勫垯鍒ゆ柇瀛樺湪楂橀闄╋紝寤鸿璋冩暣澶勬柟鎴栬ˉ鍏呬汉宸ョ‘璁ゃ€?;
+            case "MEDIUM" -> "鏈湴瑙勫垯鍒ゆ柇瀛樺湪涓瓑椋庨櫓锛屽缓璁尰鐢熷鏍稿墏閲忋€佺枟绋嬫垨绂佸繉銆?;
+            default -> "鏈湴瑙勫垯鏈彂鐜版槑鏄鹃闄╋紝寤鸿甯歌澶嶆牳鍚庢彁浜ゃ€?;
         };
         return new ReviewComputation(risk, String.join("\n", hits), missing, summary, summary);
     }
@@ -1663,6 +1811,29 @@ public class WorkflowService {
         );
     }
 
+    private DiagnosisSuggestionRecordEntity requireDoctorDiagnosisSuggestion(Long suggestionId, Long doctorId) {
+        DiagnosisSuggestionRecordEntity entity = diagnosisSuggestionRepository.findById(suggestionId)
+                .orElseThrow(() -> notFound("diagnosis suggestion not found"));
+        if (!Objects.equals(entity.getDoctorId(), doctorId)) {
+            throw new ApiException(HttpStatus.FORBIDDEN.value(), "diagnosis suggestion permission required");
+        }
+        return entity;
+    }
+
+    private DiagnosisSuggestionResponse toDiagnosisSuggestionResponse(DiagnosisSuggestionRecordEntity entity,
+                                                                      String summary,
+                                                                      boolean degraded) {
+        return new DiagnosisSuggestionResponse(
+                entity.getId(),
+                entity.getRegistrationId(),
+                entity.getSuggestedDiagnoses(),
+                entity.getSuggestedExamItems(),
+                entity.getAdoptionStatus(),
+                summary,
+                degraded
+        );
+    }
+
     private List<PrescriptionItemSummary> prescriptionItemsFor(Long prescriptionId) {
         if (prescriptionId == null) {
             return List.of();
@@ -1674,17 +1845,17 @@ public class WorkflowService {
 
     private List<String> nextActions(RegistrationEntity registration) {
         if (registration == null || registration.getStatus() == null) {
-            return List.of("等待接诊");
+            return List.of("绛夊緟鎺ヨ瘖");
         }
         return switch (registration.getStatus()) {
-            case WAITING -> List.of("开始接诊", "查看分诊建议", "查看挂号信息");
-            case IN_CONSULTATION -> List.of("录入问诊", "生成病历草稿", "保存正式病历");
-            case MEDICAL_RECORD_SAVED -> List.of("开立处方", "处方审核", "结束就诊");
-            case PRESCRIPTION_REVIEWED -> List.of("提交处方", "查看审核结果", "结束就诊");
-            case PRESCRIPTION_SUBMITTED -> List.of("查看已提交处方", "结束就诊");
-            case COMPLETED -> List.of("查看历史记录", "提交反馈");
-            case CANCELLED -> List.of("查看取消记录");
-            default -> List.of("查看挂号详情");
+            case WAITING -> List.of("寮€濮嬫帴璇?, "鏌ョ湅鍒嗚瘖寤鸿", "鏌ョ湅鎸傚彿淇℃伅");
+            case IN_CONSULTATION -> List.of("褰曞叆闂瘖", "鐢熸垚鐥呭巻鑽夌", "淇濆瓨姝ｅ紡鐥呭巻");
+            case MEDICAL_RECORD_SAVED -> List.of("寮€绔嬪鏂?, "澶勬柟瀹℃牳", "缁撴潫灏辫瘖");
+            case PRESCRIPTION_REVIEWED -> List.of("鎻愪氦澶勬柟", "鏌ョ湅瀹℃牳缁撴灉", "缁撴潫灏辫瘖");
+            case PRESCRIPTION_SUBMITTED -> List.of("鏌ョ湅宸叉彁浜ゅ鏂?, "缁撴潫灏辫瘖");
+            case COMPLETED -> List.of("鏌ョ湅鍘嗗彶璁板綍", "鎻愪氦鍙嶉");
+            case CANCELLED -> List.of("鏌ョ湅鍙栨秷璁板綍");
+            default -> List.of("鏌ョ湅鎸傚彿璇︽儏");
         };
     }
 
@@ -1806,27 +1977,27 @@ public class WorkflowService {
 
     private String buildPatientSummary(RegistrationEntity registration) {
         PatientEntity patient = patientRepository.findById(registration.getPatientId()).orElse(null);
-        String patientName = patient == null ? "匿名患者" : maskName(patient.getName());
-        return "患者：" + patientName
-                + "；科室：" + firstNonBlank(registration.getDepartmentSnapshot(), "未分科")
-                + "；医生：" + firstNonBlank(registration.getDoctorSnapshot(), "未指定");
+        String patientName = patient == null ? "鍖垮悕鎮ｈ€? : maskName(patient.getName());
+        return "鎮ｈ€咃細" + patientName
+                + "锛涚瀹わ細" + firstNonBlank(registration.getDepartmentSnapshot(), "鏈垎绉?)
+                + "锛涘尰鐢燂細" + firstNonBlank(registration.getDoctorSnapshot(), "鏈寚瀹?);
     }
 
     private String buildRiskSummary(PrescriptionReviewEntity review) {
         StringBuilder builder = new StringBuilder();
-        builder.append("风险等级：").append(firstNonBlank(review.getRiskLevel(), "UNKNOWN"));
+        builder.append("椋庨櫓绛夌骇锛?).append(firstNonBlank(review.getRiskLevel(), "UNKNOWN"));
         if (review.getLocalRuleHits() != null && !review.getLocalRuleHits().isBlank()) {
-            builder.append("；命中：").append(truncateText(review.getLocalRuleHits(), 120));
+            builder.append("锛涘懡涓細").append(truncateText(review.getLocalRuleHits(), 120));
         }
         if (review.getLlmSummary() != null && !review.getLlmSummary().isBlank()) {
-            builder.append("；建议：").append(truncateText(review.getLlmSummary(), 120));
+            builder.append("锛涘缓璁細").append(truncateText(review.getLlmSummary(), 120));
         }
         return builder.toString();
     }
 
     private String maskName(String name) {
         if (name == null || name.isBlank()) {
-            return "匿名患者";
+            return "鍖垮悕鎮ｈ€?;
         }
         String normalized = name.trim();
         if (normalized.length() == 1) {
@@ -1997,11 +2168,11 @@ public class WorkflowService {
 
     private String firstSentence(String text) {
         if (text == null || text.isBlank()) {
-            return "主诉待补充";
+            return "涓昏瘔寰呰ˉ鍏?;
         }
         String normalized = text.trim();
         int index = -1;
-        for (String delimiter : List.of("。", ".", "\n", "；", ";")) {
+        for (String delimiter : List.of("銆?, ".", "\n", "锛?, ";")) {
             int found = normalized.indexOf(delimiter);
             if (found >= 0 && (index < 0 || found < index)) {
                 index = found;
@@ -2012,39 +2183,39 @@ public class WorkflowService {
 
     private String inferDiagnosis(String text) {
         String value = text == null ? "" : text;
-        if (containsAny(value, "胸", "心悸", "气短", "血压")) {
-            return "胸痛待查，需排除心血管相关疾病";
+        if (containsAny(value, "鑳?, "蹇冩偢", "姘旂煭", "琛€鍘?)) {
+            return "鑳哥棝寰呮煡锛岄渶鎺掗櫎蹇冭绠＄浉鍏崇柧鐥?;
         }
-        if (containsAny(value, "咳", "发热", "咽", "呼吸")) {
-            return "上呼吸道感染可能";
+        if (containsAny(value, "鍜?, "鍙戠儹", "鍜?, "鍛煎惛")) {
+            return "涓婂懠鍚搁亾鎰熸煋鍙兘";
         }
-        if (containsAny(value, "胃", "腹", "恶心", "腹泻")) {
-            return "胃肠功能紊乱可能";
+        if (containsAny(value, "鑳?, "鑵?, "鎭跺績", "鑵规郴")) {
+            return "鑳冭偁鍔熻兘绱婁贡鍙兘";
         }
-        return "常见内科不适，需结合查体进一步明确";
+        return "甯歌鍐呯涓嶉€傦紝闇€缁撳悎鏌ヤ綋杩涗竴姝ユ槑纭?;
     }
 
     private String buildTreatmentPlan(String diagnosis) {
-        if (diagnosis.contains("心")) {
-            return "建议完善心电图、心肌酶和血压监测；如症状加重及时急诊。";
+        if (diagnosis.contains("蹇?)) {
+            return "寤鸿瀹屽杽蹇冪數鍥俱€佸績鑲岄叾鍜岃鍘嬬洃娴嬶紱濡傜棁鐘跺姞閲嶅強鏃舵€ヨ瘖銆?;
         }
-        if (diagnosis.contains("呼吸")) {
-            return "建议休息、补液，必要时完善血常规和胸部影像检查。";
+        if (diagnosis.contains("鍛煎惛")) {
+            return "寤鸿浼戞伅銆佽ˉ娑诧紝蹇呰鏃跺畬鍠勮甯歌鍜岃兏閮ㄥ奖鍍忔鏌ャ€?;
         }
-        return "建议完善基础检查，结合症状给予对症处理并复诊。";
+        return "寤鸿瀹屽杽鍩虹妫€鏌ワ紝缁撳悎鐥囩姸缁欎簣瀵圭棁澶勭悊骞跺璇娿€?;
     }
 
     private String suggestExamItems(String diagnosis) {
-        if (diagnosis.contains("心")) {
-            return "心电图、心肌酶谱、血压监测、必要时心脏彩超";
+        if (diagnosis.contains("蹇?)) {
+            return "蹇冪數鍥俱€佸績鑲岄叾璋便€佽鍘嬬洃娴嬨€佸繀瑕佹椂蹇冭剰褰╄秴";
         }
-        if (diagnosis.contains("呼吸")) {
-            return "血常规、C 反应蛋白、胸部影像";
+        if (diagnosis.contains("鍛煎惛")) {
+            return "琛€甯歌銆丆 鍙嶅簲铔嬬櫧銆佽兏閮ㄥ奖鍍?;
         }
-        if (diagnosis.contains("胃") || diagnosis.contains("肠")) {
-            return "腹部查体、便常规、必要时腹部超声";
+        if (diagnosis.contains("鑳?) || diagnosis.contains("鑲?)) {
+            return "鑵归儴鏌ヤ綋銆佷究甯歌銆佸繀瑕佹椂鑵归儴瓒呭０";
         }
-        return "血常规、尿常规、基础生化";
+        return "琛€甯歌銆佸翱甯歌銆佸熀纭€鐢熷寲";
     }
 
     private String hashItems(List<PrescriptionItemRequest> items) {
@@ -2086,8 +2257,19 @@ public class WorkflowService {
         return new ApiException(HttpStatus.NOT_FOUND.value(), message);
     }
 
+    private ApiException badRequest(String message) {
+        return new ApiException(HttpStatus.BAD_REQUEST.value(), message);
+    }
+
     private ApiException conflict(String message) {
         return new ApiException(HttpStatus.CONFLICT.value(), message);
+    }
+
+    private List<PrescriptionItemRequest> requirePrescriptionItems(List<PrescriptionItemRequest> items) {
+        if (items == null || items.isEmpty()) {
+            throw badRequest("please add at least one prescription item before review or submit");
+        }
+        return items;
     }
 
     private record ReviewComputation(
@@ -2099,3 +2281,5 @@ public class WorkflowService {
     ) {
     }
 }
+
+

@@ -4,6 +4,7 @@ import { Plus } from 'lucide-vue-next';
 import SectionCard from '@/components/shared/SectionCard.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
+import PaginationBar from '@/components/shared/PaginationBar.vue';
 
 const configTabs = [
   { id: 'rules' as const, label: '审方规则' },
@@ -36,7 +37,7 @@ const { workspace } = defineProps<{ workspace: any }>();
             <th class="pb-2 font-medium">编码</th><th class="pb-2 font-medium">类型</th><th class="pb-2 font-medium">风险</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="item in workspace.rules" :key="item.id" class="border-b border-border">
+            <tr v-for="item in workspace.paginatedRules.pagedItems" :key="item.id" class="border-b border-border">
               <td class="py-2.5 font-medium">{{ item.ruleCode }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.ruleType }}</td>
               <td class="py-2.5"><StatusChip :tone="item.riskLevel === 'HIGH' ? 'danger' : item.riskLevel === 'MEDIUM' ? 'warning' : 'success'">{{ item.riskLevel }}</StatusChip></td>
@@ -49,6 +50,13 @@ const { workspace } = defineProps<{ workspace: any }>();
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="workspace.paginatedRules.page"
+        :page-count="workspace.paginatedRules.pageCount"
+        :total="workspace.paginatedRules.total"
+        :page-size="workspace.paginatedRules.pageSize"
+        @update:page="workspace.paginatedRules.setPage"
+      />
       <EmptyState v-if="!workspace.rules.length" icon="search" title="暂无规则" />
     </SectionCard>
 
@@ -59,7 +67,7 @@ const { workspace } = defineProps<{ workspace: any }>();
             <th class="pb-2 font-medium">提供方</th><th class="pb-2 font-medium">模型</th><th class="pb-2 font-medium">范围</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="item in workspace.aiConfigs" :key="item.id" class="border-b border-border">
+            <tr v-for="item in workspace.paginatedAiConfigs.pagedItems" :key="item.id" class="border-b border-border">
               <td class="py-2.5 font-medium">{{ item.provider }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.modelName }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.taskScope }}</td>
@@ -72,6 +80,13 @@ const { workspace } = defineProps<{ workspace: any }>();
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="workspace.paginatedAiConfigs.page"
+        :page-count="workspace.paginatedAiConfigs.pageCount"
+        :total="workspace.paginatedAiConfigs.total"
+        :page-size="workspace.paginatedAiConfigs.pageSize"
+        @update:page="workspace.paginatedAiConfigs.setPage"
+      />
     </SectionCard>
 
     <SectionCard v-if="activeConfigTab === 'prompt'" title="Prompt模板">
@@ -81,10 +96,10 @@ const { workspace } = defineProps<{ workspace: any }>();
             <th class="pb-2 font-medium">编码</th><th class="pb-2 font-medium">类型</th><th class="pb-2 font-medium">科室</th><th class="pb-2 font-medium">版本</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="item in workspace.promptTemplates" :key="item.id" class="border-b border-border">
+            <tr v-for="item in workspace.paginatedPromptTemplates.pagedItems" :key="item.id" class="border-b border-border">
               <td class="py-2.5 font-medium">{{ item.templateCode }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.taskType }}</td>
-              <td class="py-2.5 text-text-secondary">{{ item.deptCode ?? '-' }}</td>
+              <td class="py-2.5 text-text-secondary">{{ workspace.formatPromptDeptCode(item.deptCode) }}</td>
               <td class="py-2.5 text-text-secondary">v{{ item.version }}</td>
               <td class="py-2.5"><StatusChip :tone="item.status === 'ACTIVE' ? 'success' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</StatusChip></td>
               <td class="py-2.5"><div class="flex gap-1">
@@ -95,6 +110,13 @@ const { workspace } = defineProps<{ workspace: any }>();
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="workspace.paginatedPromptTemplates.page"
+        :page-count="workspace.paginatedPromptTemplates.pageCount"
+        :total="workspace.paginatedPromptTemplates.total"
+        :page-size="workspace.paginatedPromptTemplates.pageSize"
+        @update:page="workspace.paginatedPromptTemplates.setPage"
+      />
     </SectionCard>
   </div>
 </template>

@@ -86,7 +86,14 @@ const { workspace } = defineProps<{ workspace: any }>();
       <template v-else>
         <label class="label-text">模板编码 <input v-model="workspace.promptForm.templateCode" class="input-field mt-1" /></label>
         <label class="label-text">任务类型 <input v-model="workspace.promptForm.taskType" class="input-field mt-1" /></label>
-        <label class="label-text">科室编码 <input v-model="workspace.promptForm.deptCode" class="input-field mt-1" /></label>
+        <label class="label-text">
+          科室编码
+          <input
+            v-model.trim="workspace.promptForm.deptCode"
+            class="input-field mt-1"
+            placeholder="留空表示全局模板"
+          />
+        </label>
         <label class="label-text">状态 <input v-model="workspace.promptForm.status" class="input-field mt-1" /></label>
         <label class="label-text">版本 <input v-model.number="workspace.promptForm.version" type="number" min="0" class="input-field mt-1" /></label>
         <label class="label-text col-span-2">模板正文 <textarea v-model="workspace.promptForm.templateBody" class="input-field h-20 resize-none mt-1" /></label>
@@ -96,7 +103,7 @@ const { workspace } = defineProps<{ workspace: any }>();
     </div>
     <div class="flex gap-2 mt-4">
       <button class="btn-primary" type="button" @click="workspace.saveCurrent()" :disabled="workspace.saving">{{ workspace.saving ? '保存中...' : '保存' }}</button>
-      <button class="btn-secondary" type="button" @click="workspace.currentId = null; workspace.currentKind = ''">取消</button>
+      <button class="btn-secondary" type="button" @click="workspace.closeEditor()">取消</button>
     </div>
   </SectionCard>
 </template>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
-import { Sparkles, PanelRightOpen } from 'lucide-vue-next';
+import { Sparkles, PanelRightOpen, CheckCircle2 } from 'lucide-vue-next';
 import SectionCard from '@/components/shared/SectionCard.vue';
-import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
+import ConfirmDialog from '@/components/shared/ConfirmDialog.vue';
 import WorkflowSidebar from '@/components/workflow/WorkflowSidebar.vue';
 import { useAiStreamStore } from '@/stores/ai-stream';
 
@@ -18,17 +18,45 @@ function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value;
 }
 
+function openSidebarForStep(stepId: string) {
+  sidebarOpen.value = true;
+  sidebarRef.value?.triggerStep(stepId);
+}
+
+function runMedicalRecordWorkflow() {
+  openSidebarForStep('MEDICAL_RECORD');
+}
+
+function runDiagnosisWorkflow() {
+  openSidebarForStep('DIAGNOSIS');
+}
+
+function runPrescriptionReviewWorkflow() {
+  openSidebarForStep('PRESCRIPTION_REVIEW');
+}
+
+async function runSidebarStep(stepId: string, action: () => Promise<boolean> | boolean, fallbackMessage: string) {
+  const ok = await action();
+  if (!ok && sidebarRef.value) {
+    sidebarRef.value.setStepError(stepId, workspace.error || fallbackMessage);
+  }
+}
+
 // Handle sidebar step trigger
 function onSidebarTrigger(stepId: string) {
   switch (stepId) {
     case 'MEDICAL_RECORD':
-      workspace.generateDraftMedicalRecord();
+      void runSidebarStep('MEDICAL_RECORD', workspace.generateDraftMedicalRecord, '请先填写问诊对话内容');
       break;
     case 'DIAGNOSIS':
-      workspace.diagnoseCurrentCase();
+      void runSidebarStep('DIAGNOSIS', workspace.diagnoseCurrentCase, '请先填写问诊对话内容');
       break;
     case 'PRESCRIPTION_REVIEW':
-      workspace.reviewCurrentPrescription?.();
+      void runSidebarStep(
+        'PRESCRIPTION_REVIEW',
+        () => workspace.reviewCurrentPrescription?.() ?? false,
+        '请先至少添加一条处方项目',
+      );
       break;
   }
 }
@@ -38,13 +66,13 @@ function onSidebarAdopt(stepId: string) {
   switch (stepId) {
     case 'MEDICAL_RECORD':
       // Record is already populated by stream, save it
-      workspace.saveCurrentMedicalRecord();
+      void workspace.saveCurrentMedicalRecord();
       break;
     case 'DIAGNOSIS':
       // Parse the diagnosis text and adopt first diagnosis
-      if (workspace.diagnosisSuggestions?.length) {
-        const first = workspace.diagnosisSuggestions[0];
-        if (first.name) workspace.recordForm.preliminaryDiagnosis = first.name;
+      if (workspace.diagnosisSuggestion?.suggestedDiagnoses) {
+        const first = String(workspace.diagnosisSuggestion.suggestedDiagnoses).split('\n')[0]?.trim();
+        if (first) workspace.recordForm.preliminaryDiagnosis = first;
       }
       break;
     case 'PRESCRIPTION_REVIEW':
@@ -67,22 +95,41 @@ watch(() => aiStreamStore.streamText, (text) => {
   }
 });
 
+watch(() => workspace.selectedRegistrationId, () => {
+  sidebarRef.value?.reset();
+  sidebarOpen.value = false;
+});
+
 watch(() => workspace.generatingRecord, (val) => {
   if (!val && sidebarRef.value) {
-    sidebarRef.value.setStepCompleted('MEDICAL_RECORD');
+    if (workspace.recordDegraded || workspace.error) {
+      sidebarRef.value.setStepError('MEDICAL_RECORD', workspace.error || '生成病历失败');
+    } else {
+      sidebarRef.value.setStepCompleted('MEDICAL_RECORD');
+    }
   }
 });
 
 watch(() => workspace.diagnosingRecord, (val) => {
-  if (!val && sidebarRef.value && workspace.diagnosisSuggestion) {
-    sidebarRef.value.setStepCompleted('DIAGNOSIS');
-    const text = workspace.diagnosisSuggestion.suggestedDiagnoses || '';
-    sidebarRef.value.updateStepContent('DIAGNOSIS', text);
+  if (!val && sidebarRef.value) {
+    if (workspace.diagnosisDegraded || workspace.error) {
+      sidebarRef.value.setStepError('DIAGNOSIS', workspace.error || '生成诊断建议失败');
+      return;
+    }
+    if (workspace.diagnosisSuggestion) {
+      sidebarRef.value.setStepCompleted('DIAGNOSIS');
+      const text = workspace.diagnosisSuggestion.suggestedDiagnoses || '';
+      sidebarRef.value.updateStepContent('DIAGNOSIS', text);
+    }
   }
 });
 
 watch(() => workspace.reviewingPrescription, (val) => {
-  if (!val && sidebarRef.value && workspace.reviewResult) {
+  if (!val && sidebarRef.value) {
+    if (workspace.error || !workspace.reviewResult) {
+      sidebarRef.value.setStepError('PRESCRIPTION_REVIEW', workspace.error || '处方审查失败');
+      return;
+    }
     sidebarRef.value.setStepCompleted('PRESCRIPTION_REVIEW');
     const r = workspace.reviewResult;
     const content = [
@@ -96,6 +143,16 @@ watch(() => workspace.reviewingPrescription, (val) => {
 
 interface DiagnosisEntry { name: string; confidence: number }
 interface RuleHitEntry { ruleName?: string; alertMessage?: string; suggestion?: string; riskLevel?: string }
+interface DrugEntry {
+  id: number;
+  name: string;
+  specification?: string | null;
+  dosageForm?: string | null;
+  packageUnit?: string | null;
+  unitPrice?: number | null;
+  defaultUsage?: string | null;
+  contraindications?: string | null;
+}
 
 function parseDiagnoses(text: string): DiagnosisEntry[] {
   if (!text) return [];
@@ -124,7 +181,22 @@ function confidenceFg(conf: number): string {
 }
 
 function adoptDiagnosis(name: string) {
-  workspace.recordForm.preliminaryDiagnosis = name;
+  void workspace.adoptCurrentDiagnosis(name);
+}
+
+function drugMeta(drug: DrugEntry): string {
+  return [drug.specification, drug.dosageForm, drug.packageUnit].filter(Boolean).join(' · ') || '暂无规格信息';
+}
+
+function selectedDrug(item: { drugId: number | null }) {
+  return workspace.availableDrugs.find((drug: DrugEntry) => drug.id === item.drugId) as DrugEntry | undefined;
+}
+
+function drugPrice(drug: DrugEntry | undefined) {
+  if (!drug || drug.unitPrice === null || drug.unitPrice === undefined) {
+    return '暂无单价';
+  }
+  return `¥${Number(drug.unitPrice).toFixed(2)}`;
 }
 
 function parseRuleHits(raw: string | Record<string, unknown>[]): RuleHitEntry[] {
@@ -158,6 +230,12 @@ function ruleRiskClass(level: string | null | undefined): string {
     default: return 'bg-green-100 text-success';
   }
 }
+
+function beginButtonLabel() {
+  if (workspace.startingConsultation) return '接诊中...';
+  if (workspace.canBeginSelectedConsultation) return '开始接诊';
+  return workspace.consultationStatusLabel || '已开始';
+}
 </script>
 
 <template>
@@ -187,23 +265,42 @@ function ruleRiskClass(level: string | null | undefined): string {
 
         <div v-else-if="workspace.workspace" class="space-y-4">
           <!-- Quick actions -->
-          <div class="flex items-center gap-2">
-            <button class="btn-primary" type="button" @click="workspace.beginSelectedConsultation()" :disabled="workspace.startingConsultation">
-              {{ workspace.startingConsultation ? '接诊中...' : '开始接诊' }}
+          <div class="flex items-center gap-2 flex-wrap">
+            <button
+              class="btn-primary"
+              type="button"
+              @click="workspace.beginSelectedConsultation()"
+              :disabled="workspace.startingConsultation || !workspace.canBeginSelectedConsultation"
+              :class="{ 'opacity-75 cursor-default': !workspace.canBeginSelectedConsultation }"
+            >
+              <CheckCircle2 v-if="!workspace.canBeginSelectedConsultation" :size="16" />
+              {{ beginButtonLabel() }}
             </button>
-            <button class="btn-danger" type="button" @click="workspace.completeSelectedConsultation()" :disabled="workspace.completingConsultation">
-              {{ workspace.completingConsultation ? '处理中...' : '结束就诊' }}
-            </button>
+              <button class="btn-danger" type="button" @click="workspace.requestCompleteSelectedConsultation()" :disabled="workspace.completingConsultation">
+                {{ workspace.completingConsultation ? '处理中...' : '结束就诊' }}
+              </button>
+            <span
+              class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium"
+              :class="{
+                'bg-blue-50 text-info': workspace.consultationStatusTone === 'info',
+                'bg-amber-50 text-warning': workspace.consultationStatusTone === 'warning',
+                'bg-green-50 text-success': workspace.consultationStatusTone === 'success',
+                'bg-red-50 text-danger': workspace.consultationStatusTone === 'danger',
+                'bg-gray-100 text-text-secondary': workspace.consultationStatusTone === 'neutral',
+              }"
+            >
+              {{ workspace.consultationStatusLabel }}
+            </span>
           </div>
 
           <!-- Conversation -->
           <SectionCard title="问诊记录">
             <textarea v-model="workspace.consultationForm.conversationText" class="input-field h-32 resize-none" placeholder="输入问诊对话内容..." />
             <div class="flex gap-2 mt-3">
-              <button class="btn-primary" type="button" @click="workspace.generateDraftMedicalRecord()" :disabled="workspace.generatingRecord">
+              <button class="btn-primary" type="button" @click="runMedicalRecordWorkflow()" :disabled="workspace.generatingRecord">
                 <Sparkles :size="16" /><span>{{ workspace.generatingRecord ? '生成中...' : 'AI生成病历' }}</span>
               </button>
-              <button class="btn-secondary" type="button" @click="workspace.diagnoseCurrentCase()" :disabled="workspace.diagnosingRecord">
+              <button class="btn-secondary" type="button" @click="runDiagnosisWorkflow()" :disabled="workspace.diagnosingRecord">
                 <Sparkles :size="16" /><span>{{ workspace.diagnosingRecord ? '诊断中...' : 'AI诊断建议' }}</span>
               </button>
             </div>
@@ -261,7 +358,7 @@ function ruleRiskClass(level: string | null | undefined): string {
               <button class="btn-ghost" type="button" @click="workspace.saveCurrentMedicalRecord()" :disabled="!workspace.recordForm.chiefComplaint">
                 采纳全部
               </button>
-              <button class="btn-ghost" type="button" @click="workspace.generateDraftMedicalRecord()" :disabled="workspace.generatingRecord">
+              <button class="btn-ghost" type="button" @click="runMedicalRecordWorkflow()" :disabled="workspace.generatingRecord">
                 重新生成
               </button>
             </div>
@@ -269,20 +366,76 @@ function ruleRiskClass(level: string | null | undefined): string {
 
           <!-- Prescription -->
           <SectionCard title="处方编辑">
-            <div class="space-y-3">
-              <div v-for="item in workspace.prescriptionItems" :key="item.key" class="flex items-center gap-2">
-                <select v-model="item.drugId" class="input-field flex-1" @change="workspace.applyDrugDefaults(item)">
-                  <option :value="null" disabled>选择药品</option>
-                  <option v-for="drug in workspace.availableDrugs" :key="drug.id" :value="drug.id">{{ drug.name }}</option>
-                </select>
-                <input v-model="item.dosage" class="input-field w-16" placeholder="用量" />
-                <input v-model="item.frequency" class="input-field w-20" placeholder="频次" />
-                <input v-model="item.quantity" class="input-field w-16" placeholder="数量" />
-                <button v-if="workspace.prescriptionItems.length > 1" class="btn-ghost !p-1 !text-danger" type="button" @click="workspace.removePrescriptionItem(item.key)">✕</button>
+            <div class="space-y-4">
+              <div class="flex gap-2">
+                <input
+                  v-model="workspace.drugSearch"
+                  class="input-field flex-1"
+                  placeholder="搜索药品名称、拼音码..."
+                  @keyup.enter="workspace.loadDrugCatalog()"
+                />
+                <button class="btn-secondary" type="button" @click="workspace.loadDrugCatalog()" :disabled="workspace.drugLoading">
+                  {{ workspace.drugLoading ? '搜索中...' : '搜索药品' }}
+                </button>
               </div>
+
+              <div class="grid gap-3">
+                <div v-for="item in workspace.prescriptionItems" :key="item.key" class="rounded-lg border border-border p-3">
+                  <div class="grid gap-2 lg:grid-cols-[minmax(220px,1.4fr)_72px_92px_92px_40px]">
+                    <select v-model="item.drugId" class="input-field" @change="workspace.applyDrugDefaults(item)">
+                      <option :value="null" disabled>选择药品</option>
+                      <option v-for="drug in workspace.availableDrugs" :key="drug.id" :value="drug.id">
+                        {{ drug.name }} · {{ drug.specification || '无规格' }}
+                      </option>
+                    </select>
+                    <input v-model="item.dosage" class="input-field" placeholder="剂量" />
+                    <input v-model="item.frequency" class="input-field" placeholder="频次" />
+                    <input v-model="item.quantity" class="input-field" placeholder="数量" />
+                    <button
+                      v-if="workspace.prescriptionItems.length > 1"
+                      class="btn-ghost !p-1 !text-danger"
+                      type="button"
+                      @click="workspace.removePrescriptionItem(item.key)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div v-if="selectedDrug(item)" class="mt-2 rounded-md bg-gray-50 p-2 text-xs text-text-secondary">
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span class="font-medium text-text-main">{{ selectedDrug(item)?.name }}</span>
+                      <span>{{ drugMeta(selectedDrug(item)!) }}</span>
+                      <span>{{ drugPrice(selectedDrug(item)) }}</span>
+                    </div>
+                    <p v-if="selectedDrug(item)?.defaultUsage" class="mt-1">默认用法：{{ selectedDrug(item)?.defaultUsage }}</p>
+                    <p v-if="selectedDrug(item)?.contraindications" class="mt-1 text-danger">禁忌：{{ selectedDrug(item)?.contraindications }}</p>
+                  </div>
+
+                  <label class="mt-2 block text-xs text-text-secondary">
+                    用药说明
+                    <input v-model="item.usageInstruction" class="input-field mt-1" placeholder="可填写餐前/餐后、特殊注意事项等" />
+                  </label>
+                </div>
+              </div>
+
+              <div v-if="workspace.availableDrugs.length" class="rounded-lg bg-blue-50 p-3">
+                <p class="text-xs font-medium text-info mb-2">快速选择药品</p>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="drug in workspace.availableDrugs.slice(0, 8)"
+                    :key="drug.id"
+                    class="rounded-full bg-white px-3 py-1 text-xs text-text-main shadow-sm hover:text-brand"
+                    type="button"
+                    @click="workspace.choosePrescriptionDrug(workspace.prescriptionItems[workspace.prescriptionItems.length - 1], drug.id)"
+                  >
+                    {{ drug.name }}
+                  </button>
+                </div>
+              </div>
+
               <div class="flex gap-2">
                 <button class="btn-secondary" type="button" @click="workspace.addPrescriptionItem()">+ 添加药品</button>
-                <button class="btn-primary" type="button" @click="workspace.reviewCurrentPrescription()" :disabled="workspace.reviewingPrescription">
+                <button class="btn-primary" type="button" @click="runPrescriptionReviewWorkflow()" :disabled="workspace.reviewingPrescription">
                   {{ workspace.reviewingPrescription ? '审方中...' : '提交审方' }}
                 </button>
               </div>
@@ -297,13 +450,34 @@ function ruleRiskClass(level: string | null | undefined): string {
           <!-- Diagnosis suggestions -->
           <SectionCard v-if="workspace.diagnosisSuggestion" title="AI 诊断建议">
             <div class="space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <span class="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-info">
+                  {{ workspace.diagnosisSuggestion.adoptionStatus === 'ADOPTED' ? '已采纳' : workspace.diagnosisSuggestion.adoptionStatus === 'IGNORED' ? '已忽略' : '待处理' }}
+                </span>
+                <button
+                  v-if="workspace.diagnosisSuggestion.adoptionStatus !== 'IGNORED'"
+                  class="btn-ghost !py-1 text-xs"
+                  type="button"
+                  :disabled="workspace.diagnosisUpdating"
+                  @click="workspace.ignoreCurrentDiagnosis('医生选择不采用该诊断建议')"
+                >
+                  忽略建议
+                </button>
+              </div>
               <div class="flex flex-wrap gap-2">
                 <span v-for="(diag, idx) in parseDiagnoses(workspace.diagnosisSuggestion.suggestedDiagnoses)" :key="idx"
                       class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
                       :style="{ background: confidenceBg(diag.confidence), color: confidenceFg(diag.confidence) }">
                   {{ diag.name }}
                   <span v-if="diag.confidence" class="opacity-70">{{ diag.confidence }}%</span>
-                  <button class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-black/10 hover:bg-black/20" @click="adoptDiagnosis(diag.name)">采纳</button>
+                  <button
+                    class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-black/10 hover:bg-black/20 disabled:opacity-50"
+                    type="button"
+                    :disabled="workspace.diagnosisUpdating || workspace.diagnosisSuggestion.adoptionStatus === 'ADOPTED'"
+                    @click="adoptDiagnosis(diag.name)"
+                  >
+                    采纳
+                  </button>
                 </span>
               </div>
               <div v-if="workspace.diagnosisSuggestion.suggestedExamItems" class="space-y-1">
@@ -347,7 +521,7 @@ function ruleRiskClass(level: string | null | undefined): string {
               <p class="text-xs text-text-secondary whitespace-pre-wrap">{{ workspace.reviewResult.llmSuggestion }}</p>
             </div>
 
-            <button class="btn-primary mt-3" type="button" @click="workspace.submitCurrentPrescription()" :disabled="workspace.submittingPrescription">
+            <button class="btn-primary mt-3" type="button" @click="workspace.requestSubmitPrescription()" :disabled="workspace.submittingPrescription">
               {{ workspace.submittingPrescription ? '提交中...' : '确认提交处方' }}
             </button>
           </SectionCard>
@@ -373,6 +547,28 @@ function ruleRiskClass(level: string | null | undefined): string {
       @close="sidebarOpen = false"
       @trigger="onSidebarTrigger"
       @adopt="onSidebarAdopt"
+    />
+
+    <ConfirmDialog
+      :open="workspace.showPrescriptionConfirm"
+      title="确认提交处方"
+      message="提交后将生成正式处方并锁定当前审方结果。"
+      level="warning"
+      confirm-label="确认提交"
+      :loading="workspace.submittingPrescription"
+      @confirm="void workspace.submitCurrentPrescription()"
+      @cancel="workspace.cancelPrescriptionSubmit()"
+    />
+
+    <ConfirmDialog
+      :open="workspace.showCompleteConfirm"
+      title="确认结束就诊"
+      message="结束后当前接诊将进入完成状态。"
+      level="danger"
+      confirm-label="确认结束"
+      :loading="workspace.completingConsultation"
+      @confirm="void workspace.confirmCompleteSelectedConsultation()"
+      @cancel="workspace.cancelCompleteSelectedConsultation()"
     />
   </div>
 </template>

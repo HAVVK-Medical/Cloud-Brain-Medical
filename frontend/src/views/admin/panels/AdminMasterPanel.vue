@@ -4,6 +4,7 @@ import { Search, Plus } from 'lucide-vue-next';
 import SectionCard from '@/components/shared/SectionCard.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
+import PaginationBar from '@/components/shared/PaginationBar.vue';
 
 const tabs = [
   { id: 'departments' as const, label: '科室' },
@@ -41,7 +42,7 @@ const { workspace } = defineProps<{ workspace: any }>();
             <th class="pb-2 font-medium">名称</th><th class="pb-2 font-medium">编码</th><th class="pb-2 font-medium">类型</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="item in workspace.departments" :key="item.id" class="border-b border-border">
+            <tr v-for="item in workspace.paginatedDepartments.pagedItems" :key="item.id" class="border-b border-border">
               <td class="py-2.5 font-medium">{{ item.name }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.code }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.type ?? '-' }}</td>
@@ -54,6 +55,13 @@ const { workspace } = defineProps<{ workspace: any }>();
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="workspace.paginatedDepartments.page"
+        :page-count="workspace.paginatedDepartments.pageCount"
+        :total="workspace.paginatedDepartments.total"
+        :page-size="workspace.paginatedDepartments.pageSize"
+        @update:page="workspace.paginatedDepartments.setPage"
+      />
       <EmptyState v-if="!workspace.departments.length && !workspace.loading" icon="search" title="暂无科室数据" />
     </SectionCard>
 
@@ -65,7 +73,7 @@ const { workspace } = defineProps<{ workspace: any }>();
             <th class="pb-2 font-medium">姓名</th><th class="pb-2 font-medium">科室</th><th class="pb-2 font-medium">职称</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="item in workspace.doctors" :key="item.id" class="border-b border-border">
+            <tr v-for="item in workspace.paginatedDoctors.pagedItems" :key="item.id" class="border-b border-border">
               <td class="py-2.5 font-medium">{{ item.name }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.departmentName ?? '-' }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.title ?? '-' }}</td>
@@ -78,6 +86,13 @@ const { workspace } = defineProps<{ workspace: any }>();
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="workspace.paginatedDoctors.page"
+        :page-count="workspace.paginatedDoctors.pageCount"
+        :total="workspace.paginatedDoctors.total"
+        :page-size="workspace.paginatedDoctors.pageSize"
+        @update:page="workspace.paginatedDoctors.setPage"
+      />
     </SectionCard>
 
     <!-- Drugs -->
@@ -88,7 +103,7 @@ const { workspace } = defineProps<{ workspace: any }>();
             <th class="pb-2 font-medium">名称</th><th class="pb-2 font-medium">规格</th><th class="pb-2 font-medium">厂家</th><th class="pb-2 font-medium">状态</th><th class="pb-2 font-medium">操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="item in workspace.drugs" :key="item.id" class="border-b border-border">
+            <tr v-for="item in workspace.paginatedDrugs.pagedItems" :key="item.id" class="border-b border-border">
               <td class="py-2.5 font-medium">{{ item.name }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.specification ?? '-' }}</td>
               <td class="py-2.5 text-text-secondary">{{ item.manufacturer ?? '-' }}</td>
@@ -101,6 +116,13 @@ const { workspace } = defineProps<{ workspace: any }>();
           </tbody>
         </table>
       </div>
+      <PaginationBar
+        :page="workspace.paginatedDrugs.page"
+        :page-count="workspace.paginatedDrugs.pageCount"
+        :total="workspace.paginatedDrugs.total"
+        :page-size="workspace.paginatedDrugs.pageSize"
+        @update:page="workspace.paginatedDrugs.setPage"
+      />
     </SectionCard>
   </div>
 </template>

@@ -30,6 +30,15 @@ const { workspace } = defineProps<{ workspace: any }>();
             {{ workspace.latestRegistration.status === 'WAITING' ? '待就诊' : workspace.latestRegistration.status === 'COMPLETED' ? '已完成' : workspace.latestRegistration.status }}
           </StatusChip>
         </div>
+        <button
+          v-if="workspace.latestRegistration.status === 'WAITING'"
+          type="button"
+          class="btn-secondary w-full !py-2 !text-sm"
+          :disabled="workspace.canceling"
+          @click="workspace.requestCancelWaitingRegistration(workspace.latestRegistration.id)"
+        >
+          {{ workspace.canceling ? '取消中...' : '取消挂号' }}
+        </button>
       </div>
     </SectionCard>
 

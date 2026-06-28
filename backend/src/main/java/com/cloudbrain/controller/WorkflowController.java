@@ -7,10 +7,13 @@ import com.cloudbrain.dto.workflow.WorkflowDtos.AiStreamSessionCreateRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiStreamSessionCreateResponse;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiUsageStats;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiCallRecordSummary;
+import com.cloudbrain.dto.workflow.WorkflowDtos.ConversationTriageConfirmRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.ConsultationWorkspace;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DashboardOverview;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DashboardTrendPoint;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DepartmentOption;
+import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionAdoptRequest;
+import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionIgnoreRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionResponse;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DoctorOption;
@@ -45,6 +48,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -109,6 +113,11 @@ public class WorkflowController {
     @PostMapping("/triage/consult")
     public Result<TriageResponse> triage(@Valid @RequestBody TriageRequest request) {
         return Result.success(workflowService.triage(ActorContextResolver.requireCurrent(), request));
+    }
+
+    @PostMapping("/triage/conversation/confirm")
+    public Result<TriageResponse> confirmConversationTriage(@Valid @RequestBody ConversationTriageConfirmRequest request) {
+        return Result.success(workflowService.confirmConversationTriage(ActorContextResolver.requireCurrent(), request));
     }
 
     @GetMapping("/triage/history")
@@ -190,6 +199,18 @@ public class WorkflowController {
         return Result.success(workflowService.suggestDiagnosis(ActorContextResolver.requireCurrent(), request));
     }
 
+    @PatchMapping("/diagnosis/{id}/adopt")
+    public Result<DiagnosisSuggestionResponse> adoptDiagnosis(@PathVariable Long id,
+                                                              @Valid @RequestBody DiagnosisSuggestionAdoptRequest request) {
+        return Result.success(workflowService.adoptDiagnosisSuggestion(ActorContextResolver.requireCurrent(), id, request));
+    }
+
+    @PatchMapping("/diagnosis/{id}/ignore")
+    public Result<DiagnosisSuggestionResponse> ignoreDiagnosis(@PathVariable Long id,
+                                                               @Valid @RequestBody(required = false) DiagnosisSuggestionIgnoreRequest request) {
+        return Result.success(workflowService.ignoreDiagnosisSuggestion(ActorContextResolver.requireCurrent(), id, request));
+    }
+
     @PostMapping("/prescription/check")
     public Result<PrescriptionReviewResponse> reviewPrescription(@Valid @RequestBody PrescriptionReviewRequest request) {
         return Result.success(workflowService.reviewPrescription(ActorContextResolver.requireCurrent(), request));
@@ -208,6 +229,11 @@ public class WorkflowController {
     @GetMapping("/prescription/list/doctor")
     public Result<List<PrescriptionSummary>> listDoctorPrescriptions() {
         return Result.success(workflowService.listDoctorPrescriptions(ActorContextResolver.requireCurrent()));
+    }
+
+    @GetMapping("/prescription/{id}")
+    public Result<PrescriptionSummary> getPrescription(@PathVariable Long id) {
+        return Result.success(workflowService.getPrescription(ActorContextResolver.requireCurrent(), id));
     }
 
     @GetMapping("/feedback/list")
@@ -284,8 +310,15 @@ public class WorkflowController {
     }
 
     @GetMapping("/admin/ai-records")
-    public Result<List<AiCallRecordSummary>> listAiRecords() {
-        return Result.success(aiCallRecordRepository.findAllByOrderByCreatedAtDesc().stream().map(record -> new AiCallRecordSummary(
+    public Result<List<AiCallRecordSummary>> listAiRecords(@RequestParam(required = false) String taskType) {
+        String normalizedTaskType = taskType == null || taskType.isBlank() ? null : taskType.trim().toUpperCase().replace("-", "_");
+        if ("ALL".equals(normalizedTaskType)) {
+            normalizedTaskType = null;
+        }
+        var records = normalizedTaskType == null
+                ? aiCallRecordRepository.findAllByOrderByCreatedAtDesc()
+                : aiCallRecordRepository.findByTaskTypeOrderByCreatedAtDesc(normalizedTaskType);
+        return Result.success(records.stream().map(record -> new AiCallRecordSummary(
                 record.getId(),
                 record.getTaskType(),
                 record.getBusinessRecordId(),

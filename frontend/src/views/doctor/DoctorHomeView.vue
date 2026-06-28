@@ -10,14 +10,12 @@ import {
 import SideNav from '@/components/layout/SideNav.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
 import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
+import RecordPrescriptionDetailDialog from '@/components/shared/RecordPrescriptionDetailDialog.vue';
 
 import {
+  adoptDiagnosisSuggestion,
   beginConsultation,
-  cancelAiStreamSession,
   completeConsultation,
-  createAiStreamSession,
-  diagnose,
-  generateMedicalRecord,
   getDashboardAiUsage,
   getDashboardOverview,
   getDashboardPrescriptionReviewRate,
@@ -25,7 +23,10 @@ import {
   getDashboardTrends,
   getDashboardTriageAccuracy,
   getDoctor,
+  getMedicalRecord,
+  getPrescription,
   getWorkspace,
+  ignoreDiagnosisSuggestion,
   listUnreadNotifications,
   listDoctorPrescriptions,
   listDoctorQueue,
@@ -37,7 +38,9 @@ import {
   searchDrugs,
   submitPrescription,
 } from '@/api/workflow';
+import { storeToRefs } from 'pinia';
 import { useAuthStore } from '@/stores/auth';
+import { useAiStreamStore } from '@/stores/ai-stream';
 import type {
   AiUsageStats,
   ConsultationWorkspace,
@@ -68,7 +71,11 @@ interface PrescriptionDraftItem {
   usageInstruction: string;
 }
 
+type StatusTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
+
 const authStore = useAuthStore();
+const aiStreamStore = useAiStreamStore();
+const { streamText, sessionId: activeStreamSessionId, streaming: aiStreaming } = storeToRefs(aiStreamStore);
 
 const loading = ref(false);
 const workspaceLoading = ref(false);
@@ -100,14 +107,16 @@ const recordDegraded = ref(false);
 const diagnosisDegraded = ref(false);
 const reviewingPrescription = ref(false);
 const submittingPrescription = ref(false);
+const diagnosisUpdating = ref(false);
+const drugLoading = ref(false);
 const showPrescriptionConfirm = ref(false);
+const showCompleteConfirm = ref(false);
 const startingConsultation = ref(false);
 const completingConsultation = ref(false);
 const notificationLoading = ref(false);
+const detailLoading = ref(false);
 const ackingNotificationId = ref<number | null>(null);
 const notificationSocketState = ref<'idle' | 'connecting' | 'connected' | 'closed'>('idle');
-const streamText = ref('');
-const activeStreamSessionId = ref<string | null>(null);
 let notificationSocket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -131,6 +140,9 @@ const recordForm = reactive({
 
 const manualConfirmation = ref('医生已完成本地规则审方并确认。');
 const prescriptionItems = ref<PrescriptionDraftItem[]>([createEmptyItem()]);
+const detailKind = ref<'record' | 'prescription' | null>(null);
+const selectedMedicalRecord = ref<MedicalRecordSummary | null>(null);
+const selectedPrescription = ref<PrescriptionSummary | null>(null);
 
 const selectedRegistration = computed<RegistrationSummary | null>(() => {
   if (workspace.value?.registration) {
@@ -138,6 +150,10 @@ const selectedRegistration = computed<RegistrationSummary | null>(() => {
   }
   return queue.value.find((item) => item.id === selectedRegistrationId.value) ?? null;
 });
+const selectedRegistrationStatus = computed(() => selectedRegistration.value?.status ?? null);
+const canBeginSelectedConsultation = computed(() => selectedRegistrationStatus.value === 'WAITING');
+const consultationStatusLabel = computed(() => registrationStatusLabel(selectedRegistrationStatus.value));
+const consultationStatusTone = computed<StatusTone>(() => registrationStatusTone(selectedRegistrationStatus.value));
 
 const overviewTone = computed(() => (error.value ? 'danger' : loading.value ? 'loading' : 'healthy'));
 const workspaceTone = computed(() => (workspaceLoading.value ? 'loading' : workspace.value ? 'healthy' : 'neutral'));
@@ -193,9 +209,12 @@ const doctorWorkspace = reactive({
   diagnosisDegraded,
   reviewingPrescription,
   submittingPrescription,
+  diagnosisUpdating,
+  drugLoading,
   startingConsultation,
   completingConsultation,
   notificationLoading,
+  detailLoading,
   ackingNotificationId,
   notificationSocketState,
   streamText,
@@ -204,7 +223,14 @@ const doctorWorkspace = reactive({
   recordForm,
   manualConfirmation,
   prescriptionItems,
+  detailKind,
+  selectedMedicalRecord,
+  selectedPrescription,
   selectedRegistration,
+  selectedRegistrationStatus,
+  canBeginSelectedConsultation,
+  consultationStatusLabel,
+  consultationStatusTone,
   overviewTone,
   workspaceTone,
   unreadNotificationCount,
@@ -221,6 +247,7 @@ const doctorWorkspace = reactive({
   loadWorkspaceSnapshot,
   loadHistory,
   loadDrugCatalog,
+  choosePrescriptionDrug,
   loadNotifications,
   upsertNotification,
   connectNotificationSocket,
@@ -235,14 +262,21 @@ const doctorWorkspace = reactive({
   beginSelectedConsultation,
   diagnoseCurrentCase,
   generateDraftMedicalRecord,
-  parseSsePayload,
-  startAiStream,
+  adoptCurrentDiagnosis,
+  ignoreCurrentDiagnosis,
   saveCurrentMedicalRecord,
   reviewCurrentPrescription,
   requestSubmitPrescription,
   submitCurrentPrescription,
   cancelPrescriptionSubmit,
   showPrescriptionConfirm,
+  requestCompleteSelectedConsultation,
+  confirmCompleteSelectedConsultation,
+  cancelCompleteSelectedConsultation,
+  showCompleteConfirm,
+  viewMedicalRecordDetail,
+  viewPrescriptionDetail,
+  closeRecordPrescriptionDetail,
   ackNotification,
   completeSelectedConsultation,
 });
@@ -294,6 +328,43 @@ function riskTone(level: string | null | undefined) {
   return 'healthy';
 }
 
+function registrationStatusLabel(status: string | null | undefined) {
+  switch (status) {
+    case 'WAITING':
+      return '等待接诊';
+    case 'IN_CONSULTATION':
+      return '就诊中';
+    case 'MEDICAL_RECORD_SAVED':
+      return '病历已保存';
+    case 'PRESCRIPTION_REVIEWED':
+      return '处方已审核';
+    case 'PRESCRIPTION_SUBMITTED':
+      return '处方已提交';
+    case 'COMPLETED':
+      return '已完成';
+    case 'CANCELLED':
+      return '已取消';
+    default:
+      return '未选中';
+  }
+}
+
+function registrationStatusTone(status: string | null | undefined): StatusTone {
+  switch (status) {
+    case 'WAITING':
+      return 'info';
+    case 'COMPLETED':
+      return 'success';
+    case 'CANCELLED':
+      return 'danger';
+    case null:
+    case undefined:
+      return 'neutral';
+    default:
+      return 'warning';
+  }
+}
+
 function emptyRecordForm() {
   return {
     chiefComplaint: '',
@@ -329,16 +400,9 @@ function applyDiagnosisResult(result: DiagnosisSuggestionResponse) {
 }
 
 function resetPerPatientState() {
-  // Cancel any in-flight SSE stream for the previous patient
-  if (activeStreamSessionId.value) {
-    try {
-      cancelAiStreamSession(activeStreamSessionId.value).catch(() => {});
-    } catch {
-      // stream may already have ended
-    }
-    activeStreamSessionId.value = null;
+  if (activeStreamSessionId.value || aiStreaming.value) {
+    void aiStreamStore.cancel();
   }
-  streamText.value = '';
   recordDegraded.value = false;
   diagnosisDegraded.value = false;
 
@@ -402,6 +466,16 @@ function syncFormsFromWorkspace(snapshot: ConsultationWorkspace | null) {
   }
 }
 
+function applyRegistrationSummary(registration: RegistrationSummary) {
+  queue.value = queue.value.map((item) => (item.id === registration.id ? registration : item));
+  if (workspace.value?.registration.id === registration.id) {
+    workspace.value = {
+      ...workspace.value,
+      registration,
+    };
+  }
+}
+
 async function loadWorkspaceSnapshot(registrationId: number) {
   workspaceLoading.value = true;
   try {
@@ -424,7 +498,12 @@ async function loadHistory() {
 }
 
 async function loadDrugCatalog() {
-  availableDrugs.value = await searchDrugs(drugSearch.value.trim() || undefined);
+  drugLoading.value = true;
+  try {
+    availableDrugs.value = await searchDrugs(drugSearch.value.trim() || undefined);
+  } finally {
+    drugLoading.value = false;
+  }
 }
 
 async function loadNotifications() {
@@ -496,14 +575,7 @@ async function closeRealtimeChannels() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-  if (activeStreamSessionId.value) {
-    try {
-      await cancelAiStreamSession(activeStreamSessionId.value);
-    } catch {
-      // stream may already have ended
-    }
-    activeStreamSessionId.value = null;
-  }
+  await aiStreamStore.cancel();
   notificationSocket?.close();
   notificationSocket = null;
 }
@@ -525,7 +597,23 @@ async function loadDashboardBundle() {
   triageAccuracy.value = triageData;
 }
 
-async function refreshAll() {
+function clearWorkspaceSelection() {
+  selectedRegistrationId.value = null;
+  workspace.value = null;
+  syncFormsFromWorkspace(null);
+}
+
+function resolveQueueSelection(queueData: RegistrationSummary[], preferredRegistrationId?: number | null) {
+  const preferredId = preferredRegistrationId === undefined
+    ? selectedRegistrationId.value
+    : preferredRegistrationId;
+  if (preferredId !== null && preferredId !== undefined && queueData.some((item) => item.id === preferredId)) {
+    return preferredId;
+  }
+  return queueData[0]?.id ?? null;
+}
+
+async function refreshAll(preferredRegistrationId?: number | null) {
   loading.value = true;
   error.value = '';
   try {
@@ -546,15 +634,11 @@ async function refreshAll() {
     await loadHistory();
     await loadDrugCatalog();
 
-    if (selectedRegistrationId.value === null) {
-      selectedRegistrationId.value = queueData[0]?.id ?? null;
-    }
-
-    if (selectedRegistrationId.value !== null) {
-      await loadWorkspaceSnapshot(selectedRegistrationId.value);
+    const nextRegistrationId = resolveQueueSelection(queueData, preferredRegistrationId);
+    if (nextRegistrationId !== null) {
+      await loadWorkspaceSnapshot(nextRegistrationId);
     } else {
-      workspace.value = null;
-      syncFormsFromWorkspace(null);
+      clearWorkspaceSelection();
     }
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '医生工作台加载失败');
@@ -592,6 +676,11 @@ function applyDrugDefaults(item: PrescriptionDraftItem) {
   }
 }
 
+function choosePrescriptionDrug(item: PrescriptionDraftItem, drugId: number) {
+  item.drugId = drugId;
+  applyDrugDefaults(item);
+}
+
 function buildPrescriptionPayload() {
   return prescriptionItems.value
     .filter((item) => item.drugId !== null)
@@ -603,23 +692,39 @@ function buildPrescriptionPayload() {
       quantity: Number(item.quantity || '0'),
       usageInstruction: item.usageInstruction.trim() || null,
     }))
-    .filter((item) => Number.isFinite(item.drugId) && Number.isFinite(item.dosage) && Number.isFinite(item.quantity));
+    .filter((item) => (
+      Number.isFinite(item.drugId)
+      && item.drugId > 0
+      && Number.isFinite(item.dosage)
+      && item.dosage > 0
+      && Number.isFinite(item.quantity)
+      && item.quantity > 0
+      && item.frequency.length > 0
+      && item.duration.length > 0
+    ));
 }
 
 async function beginSelectedConsultation() {
   if (!selectedRegistrationId.value) {
     error.value = '请先选择一个待接诊号源';
-    return;
+    return false;
+  }
+
+  if (!canBeginSelectedConsultation.value) {
+    return false;
   }
 
   startingConsultation.value = true;
   error.value = '';
   try {
-    await beginConsultation(selectedRegistrationId.value);
-    await refreshAll();
-    await loadWorkspaceSnapshot(selectedRegistrationId.value);
+    const registrationId = selectedRegistrationId.value;
+    const registration = await beginConsultation(registrationId);
+    applyRegistrationSummary(registration);
+    await refreshAll(registrationId);
+    return true;
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '开始接诊失败');
+    return false;
   } finally {
     startingConsultation.value = false;
   }
@@ -628,23 +733,28 @@ async function beginSelectedConsultation() {
 async function diagnoseCurrentCase() {
   if (!selectedRegistrationId.value || !consultationForm.conversationText.trim()) {
     error.value = '请先填写问诊对话内容';
-    return;
+    return false;
   }
 
   diagnosingRecord.value = true;
   error.value = '';
   try {
-    try {
-      await startAiStream('DIAGNOSIS');
-    } catch {
-      applyDiagnosisResult(await diagnose({
-        registrationId: selectedRegistrationId.value,
-        conversationText: consultationForm.conversationText.trim(),
-        diagnosisDirection: consultationForm.diagnosisDirection.trim() || null,
-      }));
-    }
+    const streamRegistrationId = selectedRegistrationId.value;
+    const delivery = await aiStreamStore.start(
+      'DIAGNOSIS',
+      streamRegistrationId,
+      consultationForm.conversationText.trim(),
+      consultationForm.diagnosisDirection.trim() || null,
+      (result) => {
+        if (selectedRegistrationId.value === streamRegistrationId) {
+          applyDiagnosisResult(result as DiagnosisSuggestionResponse);
+        }
+      },
+    );
+    return delivery !== 'cancelled';
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '生成诊断建议失败');
+    return false;
   } finally {
     diagnosingRecord.value = false;
   }
@@ -653,95 +763,79 @@ async function diagnoseCurrentCase() {
 async function generateDraftMedicalRecord() {
   if (!selectedRegistrationId.value || !consultationForm.conversationText.trim()) {
     error.value = '请先填写问诊对话内容';
-    return;
+    return false;
   }
 
   generatingRecord.value = true;
   error.value = '';
   try {
-    try {
-      await startAiStream('MEDICAL_RECORD');
-    } catch {
-      const draft = await generateMedicalRecord({
-        registrationId: selectedRegistrationId.value,
-        conversationText: consultationForm.conversationText.trim(),
-        diagnosisDirection: consultationForm.diagnosisDirection.trim() || null,
-      });
-      applyMedicalRecordDraft(draft);
-    }
+    const streamRegistrationId = selectedRegistrationId.value;
+    const delivery = await aiStreamStore.start(
+      'MEDICAL_RECORD',
+      streamRegistrationId,
+      consultationForm.conversationText.trim(),
+      consultationForm.diagnosisDirection.trim() || null,
+      (result) => {
+        if (selectedRegistrationId.value === streamRegistrationId) {
+          applyMedicalRecordDraft(result as MedicalRecordSummary);
+        }
+      },
+    );
+    return delivery !== 'cancelled';
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '生成病历草稿失败');
+    return false;
   } finally {
     generatingRecord.value = false;
   }
 }
 
-function parseSsePayload<T>(value: string): T | null {
+async function adoptCurrentDiagnosis(finalDiagnosis?: string) {
+  if (!diagnosisSuggestion.value?.id) {
+    error.value = '请先生成诊断建议';
+    return false;
+  }
+  const diagnosis = (finalDiagnosis || diagnosisSuggestion.value.suggestedDiagnoses.split('\n')[0] || '').trim();
+  if (!diagnosis) {
+    error.value = '诊断建议为空，无法采纳';
+    return false;
+  }
+
+  diagnosisUpdating.value = true;
+  error.value = '';
   try {
-    return JSON.parse(value) as T;
-  } catch {
-    return null;
+    const updated = await adoptDiagnosisSuggestion(diagnosisSuggestion.value.id, { finalDiagnosis: diagnosis });
+    applyDiagnosisResult(updated);
+    recordForm.preliminaryDiagnosis = diagnosis;
+    consultationForm.diagnosisDirection = diagnosis;
+    return true;
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '采纳诊断建议失败');
+    return false;
+  } finally {
+    diagnosisUpdating.value = false;
   }
 }
 
-async function startAiStream(taskType: 'MEDICAL_RECORD' | 'DIAGNOSIS') {
-  if (!selectedRegistrationId.value || !consultationForm.conversationText.trim()) {
-    throw new Error('missing stream context');
+async function ignoreCurrentDiagnosis(reason?: string) {
+  if (!diagnosisSuggestion.value?.id) {
+    error.value = '请先生成诊断建议';
+    return false;
   }
 
-  if (!window.EventSource) {
-    throw new Error('event source unsupported');
+  diagnosisUpdating.value = true;
+  error.value = '';
+  try {
+    diagnosisSuggestion.value = await ignoreDiagnosisSuggestion(diagnosisSuggestion.value.id, {
+      reason: reason?.trim() || null,
+    });
+    return true;
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '忽略诊断建议失败');
+    return false;
+  } finally {
+    diagnosisUpdating.value = false;
   }
-
-  // Capture the registration ID at stream start to guard against patient switches
-  const streamRegistrationId = selectedRegistrationId.value;
-
-  streamText.value = '';
-  const session = await createAiStreamSession({
-    taskType,
-    registrationId: streamRegistrationId,
-    conversationText: consultationForm.conversationText.trim(),
-    diagnosisDirection: consultationForm.diagnosisDirection.trim() || null,
-  });
-  activeStreamSessionId.value = session.sessionId;
-
-  await new Promise<void>((resolve, reject) => {
-    let completed = false;
-    const source = new EventSource(`/api/ai-stream-sessions/${session.sessionId}/events?token=${encodeURIComponent(session.streamToken)}`);
-    const finish = () => {
-      completed = true;
-      activeStreamSessionId.value = null;
-      source.close();
-      resolve();
-    };
-
-    // Guard: only apply chunk text if the registration hasn't changed
-    source.addEventListener('chunk', (event) => {
-      if (selectedRegistrationId.value !== streamRegistrationId) return;
-      const payload = parseSsePayload<{ text?: string }>(event.data);
-      streamText.value += payload?.text ?? event.data;
-    });
-    // Guard: only apply results if the registration hasn't changed
-    source.addEventListener('result', (event) => {
-      if (selectedRegistrationId.value !== streamRegistrationId) return;
-      if (taskType === 'MEDICAL_RECORD') {
-        const payload = parseSsePayload<MedicalRecordSummary>(event.data);
-        if (payload) applyMedicalRecordDraft(payload);
-      } else {
-        const payload = parseSsePayload<DiagnosisSuggestionResponse>(event.data);
-        if (payload) applyDiagnosisResult(payload);
-      }
-    });
-    source.addEventListener('done', finish);
-    source.addEventListener('cancelled', finish);
-    source.onerror = () => {
-      if (!completed) {
-        activeStreamSessionId.value = null;
-        source.close();
-        reject(new Error('stream failed'));
-      }
-    };
-  });
 }
 
 async function saveCurrentMedicalRecord() {
@@ -753,8 +847,9 @@ async function saveCurrentMedicalRecord() {
   savingRecord.value = true;
   error.value = '';
   try {
+    const registrationId = selectedRegistrationId.value;
     await saveMedicalRecord({
-      registrationId: selectedRegistrationId.value,
+      registrationId,
       conversationText: consultationForm.conversationText.trim() || null,
       chiefComplaint: recordForm.chiefComplaint.trim() || null,
       presentIllness: recordForm.presentIllness.trim() || null,
@@ -765,10 +860,7 @@ async function saveCurrentMedicalRecord() {
       docNote: recordForm.docNote.trim() || null,
       aiGenerated: recordForm.aiGenerated,
     });
-    await refreshAll();
-    if (selectedRegistrationId.value) {
-      await loadWorkspaceSnapshot(selectedRegistrationId.value);
-    }
+    await refreshAll(registrationId);
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '保存病历失败');
   } finally {
@@ -779,25 +871,29 @@ async function saveCurrentMedicalRecord() {
 async function reviewCurrentPrescription() {
   if (!selectedRegistrationId.value) {
     error.value = '请先选择一个接诊号源';
-    return;
+    return false;
   }
 
   const items = buildPrescriptionPayload();
   if (!items.length) {
     error.value = '请先至少添加一条处方项目';
-    return;
+    return false;
   }
 
   reviewingPrescription.value = true;
   error.value = '';
+  reviewResult.value = null;
   try {
     reviewResult.value = await reviewPrescription({
       registrationId: selectedRegistrationId.value,
       items,
     });
     await loadNotifications();
+    return true;
   } catch (cause) {
-    error.value = resolveUiErrorMessage(cause, '处方审查失败');
+    error.value = resolveUiErrorMessage(cause, '处方审核失败');
+    reviewResult.value = null;
+    return false;
   } finally {
     reviewingPrescription.value = false;
   }
@@ -811,7 +907,7 @@ function requestSubmitPrescription() {
   const items = buildPrescriptionPayload();
   if (!items.length) {
     error.value = '请先至少添加一条处方项目';
-    return;
+    return false;
   }
   showPrescriptionConfirm.value = true;
 }
@@ -820,31 +916,31 @@ async function submitCurrentPrescription() {
   showPrescriptionConfirm.value = false;
 
   if (!selectedRegistrationId.value || !reviewResult.value?.reviewId) {
-    return;
+    return false;
   }
 
   const items = buildPrescriptionPayload();
   if (!items.length) {
     error.value = '请先至少添加一条处方项目';
-    return;
+    return false;
   }
 
   submittingPrescription.value = true;
   error.value = '';
   try {
+    const completedRegistrationId = selectedRegistrationId.value;
     await submitPrescription({
-      registrationId: selectedRegistrationId.value,
+      registrationId: completedRegistrationId,
       reviewId: reviewResult.value.reviewId,
       items,
       manualConfirmation: manualConfirmation.value.trim() || null,
     });
     await loadNotifications();
-    await refreshAll();
-    if (selectedRegistrationId.value) {
-      await loadWorkspaceSnapshot(selectedRegistrationId.value);
-    }
+    await refreshAll(null);
+    return true;
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '提交处方失败');
+    return false;
   } finally {
     submittingPrescription.value = false;
   }
@@ -852,6 +948,68 @@ async function submitCurrentPrescription() {
 
 function cancelPrescriptionSubmit() {
   showPrescriptionConfirm.value = false;
+}
+
+function requestCompleteSelectedConsultation() {
+  if (!selectedRegistrationId.value) {
+    error.value = '请先选择一个接诊号源';
+    return;
+  }
+  showCompleteConfirm.value = true;
+}
+
+async function confirmCompleteSelectedConsultation() {
+  showCompleteConfirm.value = false;
+  return completeSelectedConsultation();
+}
+
+function cancelCompleteSelectedConsultation() {
+  showCompleteConfirm.value = false;
+}
+
+async function viewMedicalRecordDetail(recordId: number) {
+  const summary = medicalRecords.value.find((item) => item.id === recordId) ?? null;
+  detailKind.value = 'record';
+  selectedMedicalRecord.value = summary;
+  selectedPrescription.value = null;
+  detailLoading.value = true;
+  error.value = '';
+  try {
+    selectedMedicalRecord.value = await getMedicalRecord(recordId);
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '加载病历详情失败');
+    if (!summary) {
+      detailKind.value = null;
+    }
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+async function viewPrescriptionDetail(prescriptionId: number) {
+  const summary = prescriptions.value.find((item) => item.id === prescriptionId) ?? null;
+  detailKind.value = 'prescription';
+  selectedMedicalRecord.value = null;
+  selectedPrescription.value = summary;
+  detailLoading.value = true;
+  error.value = '';
+  try {
+    selectedPrescription.value = await getPrescription(prescriptionId);
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '加载处方详情失败');
+    if (!summary) {
+      detailKind.value = null;
+    }
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function closeRecordPrescriptionDetail() {
+  detailKind.value = null;
+  selectedMedicalRecord.value = null;
+  selectedPrescription.value = null;
+  detailLoading.value = false;
 }
 
 async function ackNotification(id: number) {
@@ -870,19 +1028,18 @@ async function ackNotification(id: number) {
 async function completeSelectedConsultation() {
   if (!selectedRegistrationId.value) {
     error.value = '请先选择一个接诊号源';
-    return;
+    return false;
   }
 
   completingConsultation.value = true;
   error.value = '';
   try {
     await completeConsultation(selectedRegistrationId.value);
-    await refreshAll();
-    if (selectedRegistrationId.value) {
-      await loadWorkspaceSnapshot(selectedRegistrationId.value);
-    }
+    await refreshAll(null);
+    return true;
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '结束就诊失败');
+    return false;
   } finally {
     completingConsultation.value = false;
   }
@@ -916,14 +1073,14 @@ onBeforeUnmount(() => {
 
       <!-- Topline stats -->
       <div class="flex items-center gap-3 mb-6 flex-wrap">
-        <StatusChip :tone="selectedRegistration?.status === 'WAITING' ? 'info' : 'success'">
-          {{ selectedRegistration?.patientName || '未选中患者' }}
+        <StatusChip :tone="consultationStatusTone">
+          {{ selectedRegistration?.patientName || '未选中患者' }} · {{ consultationStatusLabel }}
         </StatusChip>
         <StatusChip :tone="notificationSocketState === 'connected' ? 'success' : 'neutral'" :dot="true">
           通知 {{ notificationSocketState === 'connected' ? '已连接' : '未连接' }}
         </StatusChip>
         <span class="flex-1" />
-        <button class="btn-ghost" type="button" @click="refreshAll" :disabled="loading">
+        <button class="btn-ghost" type="button" @click="refreshAll()" :disabled="loading">
           <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />
           <span>{{ loading ? '加载中' : '刷新' }}</span>
         </button>
@@ -937,4 +1094,13 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <AiChatLauncher role="doctor" />
+  <RecordPrescriptionDetailDialog
+    :open="detailKind !== null"
+    :kind="detailKind"
+    :loading="detailLoading"
+    :medical-record="selectedMedicalRecord"
+    :prescription="selectedPrescription"
+    :format-date-time="formatDateTime"
+    @close="closeRecordPrescriptionDetail()"
+  />
 </template>

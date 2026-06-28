@@ -376,75 +376,76 @@ WHERE NOT EXISTS (SELECT 1 FROM doctor WHERE username = 'doctor01');
 -- ============================================================
 -- SCHEDULES (7-day rolling from today for all 8 doctors)
 -- Each doctor gets AM (30 slots) and PM (20 slots) for next 7 days
--- Uses CURRENT_DATE + n for cross-DB compatibility (MySQL and H2 both support integer day addition)
+-- Uses TIMESTAMPADD for H2/MySQL-compatible rolling dates
 -- Generates remaining_slots via random within bounds
 -- ============================================================
 
 -- Doctor 01 (张明远, 内科) — looks up doctor by username for cross-DB compatibility
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'internal-medicine'), CURRENT_DATE + days.n, 'AM', 30, 15 + FLOOR(RAND() * 16), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'internal-medicine'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), 'AM', 30, 15 + FLOOR(RAND() * 16), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor01') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = 'AM');
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = 'AM');
 
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'internal-medicine'), CURRENT_DATE + days.n, 'PM', 20, 5 + FLOOR(RAND() * 16), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'internal-medicine'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), 'PM', 20, 5 + FLOOR(RAND() * 16), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor01') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = 'PM');
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = 'PM');
 
 -- doctor02 (李心怡, 心内科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'cardiology'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'cardiology'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor02') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
 
 -- doctor03 (王建华, 神经内科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'neurology'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'neurology'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor03') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
 
 -- doctor04 (陈思远, 神经内科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'neurology'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'neurology'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor04') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
 
 -- doctor05 (赵刚, 骨科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'orthopedics'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'orthopedics'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor05') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
 
 -- doctor06 (刘磊, 骨科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'orthopedics'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'orthopedics'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor06') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
 
 -- doctor07 (孙丽华, 皮肤科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'dermatology'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'dermatology'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor07') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
 
 -- doctor08 (周晓峰, 皮肤科)
 INSERT INTO schedule (doctor_id, department_id, work_date, period, total_slots, remaining_slots, visit_level, status, version, created_at, updated_at)
-SELECT d.id, (SELECT id FROM department WHERE code = 'dermatology'), CURRENT_DATE + days.n, period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+SELECT d.id, (SELECT id FROM department WHERE code = 'dermatology'), CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE), period.p, period.slots, GREATEST(0, period.slots - FLOOR(RAND() * 20)), 'NORMAL', 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM (SELECT id FROM doctor WHERE username = 'doctor08') d
 CROSS JOIN (SELECT 0 AS n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) days
 CROSS JOIN (SELECT 'AM' AS p, 30 AS slots UNION SELECT 'PM', 20) period
-WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CURRENT_DATE + days.n AND period = period.p);
+WHERE NOT EXISTS (SELECT 1 FROM schedule WHERE doctor_id = d.id AND work_date = CAST(TIMESTAMPADD(DAY, days.n, CURRENT_DATE) AS DATE) AND period = period.p);
+
