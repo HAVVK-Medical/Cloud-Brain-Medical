@@ -2,12 +2,16 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { CalendarDays, FileText, ScanSearch, Ticket, UserRound } from 'lucide-vue-next';
 import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
+import ConfirmDialog from '@/components/shared/ConfirmDialog.vue';
 
 import {
   cancelRegistration,
+  confirmConversationTriage,
   createFeedback,
   createRegistration,
+  getMedicalRecord,
   getPatientInfo,
+  getPrescription,
   listDepartments,
   listDoctors,
   listPatientFeedback,
@@ -29,11 +33,13 @@ import type {
   RegistrationSummary,
   ScheduleOption,
   TriageResponse,
+  ConversationTriageConfirmRequest,
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
 import { resolveUiErrorMessage } from '@/utils/zh';
 import PhoneFrame from '@/components/layout/PhoneFrame.vue';
 import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
+import RecordPrescriptionDetailDialog from '@/components/shared/RecordPrescriptionDetailDialog.vue';
 
 const authStore = useAuthStore();
 
@@ -51,6 +57,7 @@ const registering = ref(false);
 const savingProfile = ref(false);
 const submittingFeedback = ref(false);
 const canceling = ref(false);
+const detailLoading = ref(false);
 const error = ref('');
 
 const patient = ref<PatientProfile | null>(null);
@@ -63,6 +70,12 @@ const medicalRecords = ref<MedicalRecordSummary[]>([]);
 const prescriptions = ref<PrescriptionSummary[]>([]);
 const feedbacks = ref<FeedbackResponse[]>([]);
 const triageResult = ref<TriageResponse | null>(null);
+const cancelRegistrationId = ref<number | null>(null);
+const detailKind = ref<'record' | 'prescription' | null>(null);
+const selectedMedicalRecord = ref<MedicalRecordSummary | null>(null);
+const selectedPrescription = ref<PrescriptionSummary | null>(null);
+const showRegistrationConfirm = ref(false);
+const latestCreatedRegistration = ref<RegistrationSummary | null>(null);
 
 const selectedDepartmentId = ref<number | null>(null);
 const selectedDoctorId = ref<number | null>(null);
@@ -96,6 +109,9 @@ const waitingRegistrations = computed(() => registrations.value.filter((item) =>
 const completedRegistrations = computed(() => registrations.value.filter((item) => item.status === 'COMPLETED'));
 const latestRegistration = computed(() => registrations.value[0] ?? null);
 const latestTriage = computed(() => triageHistory.value[0] ?? triageResult.value);
+const cancelTargetRegistration = computed(() =>
+  registrations.value.find((item) => item.id === cancelRegistrationId.value) ?? null,
+);
 const activeTone = computed(() => (error.value ? 'danger' : loading.value ? 'loading' : 'healthy'));
 const displayName = computed(() => patient.value?.realName || patient.value?.username || authStore.sessionLabel);
 
@@ -263,6 +279,23 @@ async function runTriage() {
   }
 }
 
+async function confirmConversationTriageResult(payload: ConversationTriageConfirmRequest) {
+  triaging.value = true;
+  error.value = '';
+  try {
+    const result = await confirmConversationTriage(payload);
+    applyTriageSelection(result);
+    triageHistory.value = [result, ...triageHistory.value.filter((item) => item.triageRecordId !== result.triageRecordId)];
+    await loadCatalog(selectedDepartmentId.value);
+    return result;
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '对话分诊确认失败');
+    throw cause;
+  } finally {
+    triaging.value = false;
+  }
+}
+
 async function submitRegistration() {
   if (!selectedScheduleId.value) {
     error.value = '请先选择可用号源';
@@ -272,16 +305,34 @@ async function submitRegistration() {
   registering.value = true;
   error.value = '';
   try {
-    await createRegistration({
+    const registration = await createRegistration({
       scheduleId: selectedScheduleId.value,
       triageRecordId: triageResult.value?.triageRecordId ?? null,
     });
+    latestCreatedRegistration.value = registration;
     await refreshAll();
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '挂号失败');
   } finally {
     registering.value = false;
+    showRegistrationConfirm.value = false;
   }
+}
+
+function requestSubmitRegistration() {
+  if (!selectedScheduleId.value) {
+    error.value = '请先选择可用号源';
+    return;
+  }
+  showRegistrationConfirm.value = true;
+}
+
+function closeRegistrationConfirm() {
+  showRegistrationConfirm.value = false;
+}
+
+function dismissRegistrationSuccess() {
+  latestCreatedRegistration.value = null;
 }
 
 async function saveProfile() {
@@ -319,6 +370,73 @@ async function cancelWaitingRegistration(registrationId: number) {
   }
 }
 
+function requestCancelWaitingRegistration(registrationId: number) {
+  const target = registrations.value.find((item) => item.id === registrationId);
+  if (!target || target.status !== 'WAITING') {
+    error.value = '只能取消待就诊的挂号';
+    return;
+  }
+  cancelRegistrationId.value = registrationId;
+}
+
+async function confirmCancelWaitingRegistration() {
+  if (!cancelRegistrationId.value) {
+    return;
+  }
+  const registrationId = cancelRegistrationId.value;
+  cancelRegistrationId.value = null;
+  await cancelWaitingRegistration(registrationId);
+}
+
+function closeCancelRegistrationConfirm() {
+  cancelRegistrationId.value = null;
+}
+
+async function viewMedicalRecordDetail(recordId: number) {
+  const summary = medicalRecords.value.find((item) => item.id === recordId) ?? null;
+  detailKind.value = 'record';
+  selectedMedicalRecord.value = summary;
+  selectedPrescription.value = null;
+  detailLoading.value = true;
+  error.value = '';
+  try {
+    selectedMedicalRecord.value = await getMedicalRecord(recordId);
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '加载病历详情失败');
+    if (!summary) {
+      detailKind.value = null;
+    }
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+async function viewPrescriptionDetail(prescriptionId: number) {
+  const summary = prescriptions.value.find((item) => item.id === prescriptionId) ?? null;
+  detailKind.value = 'prescription';
+  selectedMedicalRecord.value = null;
+  selectedPrescription.value = summary;
+  detailLoading.value = true;
+  error.value = '';
+  try {
+    selectedPrescription.value = await getPrescription(prescriptionId);
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '加载处方详情失败');
+    if (!summary) {
+      detailKind.value = null;
+    }
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function closeRecordPrescriptionDetail() {
+  detailKind.value = null;
+  selectedMedicalRecord.value = null;
+  selectedPrescription.value = null;
+  detailLoading.value = false;
+}
+
 async function submitFeedback() {
   if (!feedbackForm.registrationId) {
     error.value = '请先选择已完成的挂号';
@@ -350,6 +468,7 @@ const workspace = reactive({
   savingProfile,
   submittingFeedback,
   canceling,
+  detailLoading,
   error,
   patient,
   departments,
@@ -361,6 +480,12 @@ const workspace = reactive({
   prescriptions,
   feedbacks,
   triageResult,
+  cancelRegistrationId,
+  detailKind,
+  selectedMedicalRecord,
+  selectedPrescription,
+  showRegistrationConfirm,
+  latestCreatedRegistration,
   selectedDepartmentId,
   selectedDoctorId,
   selectedScheduleId,
@@ -376,15 +501,26 @@ const workspace = reactive({
   completedRegistrations,
   latestRegistration,
   latestTriage,
+  cancelTargetRegistration,
   activeTone,
   displayName,
   chooseDepartment,
   chooseDoctor,
   chooseSchedule,
   runTriage,
+  confirmConversationTriageResult,
+  requestSubmitRegistration,
+  closeRegistrationConfirm,
+  dismissRegistrationSuccess,
   submitRegistration,
   saveProfile,
   cancelWaitingRegistration,
+  requestCancelWaitingRegistration,
+  confirmCancelWaitingRegistration,
+  closeCancelRegistrationConfirm,
+  viewMedicalRecordDetail,
+  viewPrescriptionDetail,
+  closeRecordPrescriptionDetail,
   submitFeedback,
   formatDateTime,
   formatDate,
@@ -427,4 +563,33 @@ onMounted(() => {
     </div>
   </PhoneFrame>
   <AiChatLauncher role="patient" />
+  <ConfirmDialog
+    :open="showRegistrationConfirm"
+    title="确认挂号"
+    :message="selectedSchedule ? `确认预约 ${selectedDoctor?.name || selectedSchedule.doctorName} ${formatDate(selectedSchedule.workDate)} ${selectedSchedule.period} 的号源吗？` : '确认提交当前挂号信息吗？'"
+    level="info"
+    confirm-label="确认挂号"
+    :loading="registering"
+    @confirm="void submitRegistration()"
+    @cancel="closeRegistrationConfirm()"
+  />
+  <ConfirmDialog
+    :open="cancelRegistrationId !== null"
+    title="确认取消挂号"
+    :message="cancelTargetRegistration ? `确认取消 ${cancelTargetRegistration.doctorName} ${formatDate(cancelTargetRegistration.workDate)} 的挂号吗？取消后号源将释放。` : '确认取消此挂号吗？取消后号源将释放。'"
+    level="warning"
+    confirm-label="确认取消"
+    :loading="canceling"
+    @confirm="void confirmCancelWaitingRegistration()"
+    @cancel="closeCancelRegistrationConfirm()"
+  />
+  <RecordPrescriptionDetailDialog
+    :open="detailKind !== null"
+    :kind="detailKind"
+    :loading="detailLoading"
+    :medical-record="selectedMedicalRecord"
+    :prescription="selectedPrescription"
+    :format-date-time="formatDateTime"
+    @close="closeRecordPrescriptionDetail()"
+  />
 </template>

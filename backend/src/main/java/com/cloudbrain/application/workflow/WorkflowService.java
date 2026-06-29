@@ -6,10 +6,13 @@ import com.cloudbrain.application.ai.AITextParser;
 import com.cloudbrain.common.exception.ApiException;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiUsageBucket;
 import com.cloudbrain.dto.workflow.WorkflowDtos.AiUsageStats;
+import com.cloudbrain.dto.workflow.WorkflowDtos.ConversationTriageConfirmRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.ConsultationWorkspace;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DashboardOverview;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DashboardTrendPoint;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DepartmentOption;
+import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionAdoptRequest;
+import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionIgnoreRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DiagnosisSuggestionResponse;
 import com.cloudbrain.dto.workflow.WorkflowDtos.DoctorOption;
@@ -302,7 +305,7 @@ public class WorkflowService {
         String chiefComplaint = request.chiefComplaint().trim();
 
         // Local rule: keyword-based department pick
-        DepartmentEntity localDepartment = pickDepartment(chiefComplaint);
+        DepartmentEntity localDepartment = pickExpandedDepartment(chiefComplaint);
         Map<Long, DepartmentEntity> departments = departmentsById();
         List<DoctorOption> localDoctors = doctorRepository
                 .findByDepartmentIdAndStatusOrderByNameAsc(localDepartment.getId(), ACTIVE)
@@ -333,17 +336,7 @@ public class WorkflowService {
         String aiDeptName = AITextParser.firstNonBlank(aiParsed, "recommendedDepartment", aiDeptCode);
 
         // Determine AI-recommended department
-        DepartmentEntity aiDepartment = null;
-        if (aiDeptCode != null) {
-            aiDepartment = departmentRepository.findByCode(aiDeptCode).orElse(null);
-        }
-        if (aiDepartment == null && aiDeptName != null) {
-            aiDepartment = departmentRepository.findAll().stream()
-                    .filter(d -> ACTIVE.equals(d.getStatus())
-                            && (d.getName().equals(aiDeptName) || d.getCode().equalsIgnoreCase(aiDeptName)))
-                    .findFirst()
-                    .orElse(null);
-        }
+        DepartmentEntity aiDepartment = resolveActiveDepartment(aiDeptCode, aiDeptName).orElse(null);
 
         // Use AI recommendation if available and valid; otherwise fall back to local rule
         DepartmentEntity finalDepartment = (aiDepartment != null && ACTIVE.equals(aiDepartment.getStatus()))
@@ -397,6 +390,68 @@ public class WorkflowService {
                 aiDepartment != null ? aiDepartment.getId() : null,
                 aiDepartment != null ? aiDepartment.getName() : null,
                 degraded
+        );
+    }
+
+    @Transactional
+    public TriageResponse confirmConversationTriage(ActorContext actorContext, ConversationTriageConfirmRequest request) {
+        Long patientId = requirePatient(actorContext);
+        long started = System.currentTimeMillis();
+        String chiefComplaint = request.chiefComplaint().trim();
+
+        DepartmentEntity localDepartment = pickExpandedDepartment(chiefComplaint);
+        DepartmentEntity finalDepartment = resolveActiveDepartment(request.departmentCode(), request.department())
+                .orElse(localDepartment);
+        Map<Long, DepartmentEntity> departments = departmentsById();
+        List<DoctorOption> finalDoctors = doctorRepository
+                .findByDepartmentIdAndStatusOrderByNameAsc(finalDepartment.getId(), ACTIVE)
+                .stream()
+                .map(doctor -> toDoctorOption(doctor, departments.get(doctor.getDepartmentId())))
+                .toList();
+        List<ScheduleOption> finalSchedules = listAvailableSchedules(finalDepartment.getId());
+
+        String reason = firstNonBlank(
+                request.reason(),
+                "根据 AI 对话式问诊结果，建议优先前往" + finalDepartment.getName() + "。"
+        );
+        if (request.urgencyLevel() != null && !request.urgencyLevel().isBlank()) {
+            reason = reason + "\n紧急程度：" + request.urgencyLevel().trim();
+        }
+
+        AICallRecordEntity callRecord = aiCallRecord("TRIAGE", actorContext, chiefComplaint, reason, started);
+        callRecord.setProvider("TRIAGE_CONVERSATION");
+        callRecord.setModelName("conversation-triage");
+        callRecord.setConfigVersion("conversation-v1");
+        callRecord.setPromptVersion("conversation-v1");
+        callRecord = aiCallRecordRepository.save(callRecord);
+
+        TriageRecordEntity triageRecord = new TriageRecordEntity();
+        triageRecord.setPatientId(patientId);
+        triageRecord.setChiefComplaint(chiefComplaint);
+        triageRecord.setRecommendedDept(finalDepartment.getName());
+        triageRecord.setRecommendedDoctors(finalDoctors.stream().map(DoctorOption::name).collect(Collectors.joining(", ")));
+        triageRecord.setAiResponseRaw(reason);
+        triageRecord.setCallStatus("COMPLETED");
+        triageRecord.setRecommendationSource("TRIAGE_CONVERSATION");
+        triageRecord.setAiCallRecordId(callRecord.getId());
+        triageRecord = triageRecordRepository.save(triageRecord);
+
+        callRecord.setBusinessRecordId(triageRecord.getId());
+        aiCallRecordRepository.save(callRecord);
+
+        return new TriageResponse(
+                triageRecord.getId(),
+                chiefComplaint,
+                finalDepartment.getId(),
+                finalDepartment.getName(),
+                finalDoctors,
+                finalSchedules,
+                reason,
+                triageRecord.getCallStatus(),
+                triageRecord.getRecommendationSource(),
+                finalDepartment.getId(),
+                finalDepartment.getName(),
+                false
         );
     }
 
@@ -598,7 +653,7 @@ public class WorkflowService {
         draft.setRegistrationId(registration.getId());
         draft.setChiefComplaint(firstNonBlank(aiDraft.chiefComplaint(), chief));
         draft.setPresentIllness(firstNonBlank(aiDraft.presentIllness(), request.conversationText()));
-        draft.setPastHistory(firstNonBlank(aiDraft.pastHistory(), firstNonBlank(patient.getMedicalHistory(), "未见特殊既往史。")));
+        draft.setPastHistory(firstNonBlank(aiDraft.pastHistory(), firstNonBlank(patient.getMedicalHistory(), "未见特殊既往史")));
         draft.setPhysicalExam(firstNonBlank(aiDraft.physicalExam(), "生命体征平稳，建议医生结合查体补充。"));
         draft.setPreliminaryDiagnosis(diagnosis);
         draft.setTreatmentPlan(firstNonBlank(aiDraft.treatmentPlan(), buildTreatmentPlan(diagnosis)));
@@ -626,7 +681,7 @@ public class WorkflowService {
         if (!List.of(IN_CONSULTATION, MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED).contains(registration.getStatus())) {
             String currentStatus = registration.getStatus() == null ? "未知" : registration.getStatus();
             String hint = switch (currentStatus) {
-                case "WAITING" -> "请先点击「开始接诊」后再保存病历";
+                case "WAITING" -> "请先点击“开始接诊”后再保存病历";
                 case "COMPLETED" -> "该就诊已完成，无法再保存病历";
                 case "CANCELLED" -> "该挂号已取消，无法保存病历";
                 default -> "当前就诊状态(" + currentStatus + ")不允许保存病历";
@@ -796,6 +851,38 @@ public class WorkflowService {
     }
 
     @Transactional
+    public DiagnosisSuggestionResponse adoptDiagnosisSuggestion(ActorContext actorContext,
+                                                               Long suggestionId,
+                                                               DiagnosisSuggestionAdoptRequest request) {
+        Long doctorId = requireDoctor(actorContext);
+        DiagnosisSuggestionRecordEntity entity = requireDoctorDiagnosisSuggestion(suggestionId, doctorId);
+        String finalDiagnosis = firstNonBlank(request.finalDiagnosis(), entity.getFinalDiagnosisDirection());
+        entity.setAdoptionStatus("ADOPTED");
+        entity.setFinalDiagnosisDirection(finalDiagnosis);
+        entity.setAdoptionDoctorId(doctorId);
+        entity.setAdoptionTime(LocalDateTime.now());
+        entity = diagnosisSuggestionRepository.save(entity);
+        return toDiagnosisSuggestionResponse(entity, "已采纳诊断建议。", false);
+    }
+
+    @Transactional
+    public DiagnosisSuggestionResponse ignoreDiagnosisSuggestion(ActorContext actorContext,
+                                                                Long suggestionId,
+                                                                DiagnosisSuggestionIgnoreRequest request) {
+        Long doctorId = requireDoctor(actorContext);
+        DiagnosisSuggestionRecordEntity entity = requireDoctorDiagnosisSuggestion(suggestionId, doctorId);
+        entity.setAdoptionStatus("IGNORED");
+        entity.setAdoptionDoctorId(doctorId);
+        entity.setAdoptionTime(LocalDateTime.now());
+        String reason = request == null ? null : blankToNull(request.reason());
+        if (reason != null) {
+            entity.setFinalDiagnosisDirection(reason);
+        }
+        entity = diagnosisSuggestionRepository.save(entity);
+        return toDiagnosisSuggestionResponse(entity, "已忽略诊断建议。", false);
+    }
+
+    @Transactional
     public PrescriptionReviewResponse reviewPrescription(ActorContext actorContext, PrescriptionReviewRequest request) {
         return reviewPrescription(actorContext, request, null);
     }
@@ -809,13 +896,14 @@ public class WorkflowService {
         if (!List.of(MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED, PRESCRIPTION_SUBMITTED).contains(registration.getStatus())) {
             throw conflict("please save medical record before prescription review");
         }
+        List<PrescriptionItemRequest> items = requirePrescriptionItems(request.items());
         long started = System.currentTimeMillis();
 
-        List<DrugEntity> drugs = request.items().stream()
+        List<DrugEntity> drugs = items.stream()
                 .map(item -> drugRepository.findByIdAndStatus(item.drugId(), ACTIVE)
                         .orElseThrow(() -> notFound("drug not found: " + item.drugId())))
                 .toList();
-        ReviewComputation review = computeReview(registration, request.items(), drugs);
+        ReviewComputation review = computeReview(registration, items, drugs);
         Map<String, String> variables = new LinkedHashMap<>();
         variables.put("riskLevel", review.riskLevel());
         variables.put("localRuleHits", review.localRuleHits());
@@ -856,7 +944,7 @@ public class WorkflowService {
         entity.setLlmSummary(firstNonBlank(AITextParser.firstNonBlank(reviewParsed, "llmSummary", null), review.summary()));
         entity.setLlmCallStatus(aiOutcome.meta().provider());
         entity.setAiCallRecordId(callRecord.getId());
-        entity.setPrescriptionSnapshotHash(hashItems(request.items()));
+        entity.setPrescriptionSnapshotHash(hashItems(items));
         entity.setReviewContextHash(hashContext(registration));
         entity.setBindStatus("UNBOUND");
         entity.setVersion(0);
@@ -868,26 +956,27 @@ public class WorkflowService {
 
         registration.setStatus(PRESCRIPTION_REVIEWED);
         registrationRepository.save(registration);
-        return toReviewResponse(entity, null, toItemSummariesFromRequest(request.items(), drugs));
+        return toReviewResponse(entity, null, toItemSummariesFromRequest(items, drugs));
     }
 
     @Transactional
     public PrescriptionSummary submitPrescription(ActorContext actorContext, PrescriptionSubmitRequest request) {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
+        List<PrescriptionItemRequest> items = requirePrescriptionItems(request.items());
         PrescriptionReviewEntity review = prescriptionReviewRepository.findByIdAndBindStatus(request.reviewId(), "UNBOUND")
                 .orElseThrow(() -> notFound("unbound review not found"));
         if (!Objects.equals(review.getRegistrationId(), registration.getId())) {
             throw conflict("review does not belong to this registration");
         }
-        String itemHash = hashItems(request.items());
+        String itemHash = hashItems(items);
         String contextHash = hashContext(registration);
         if (!Objects.equals(review.getPrescriptionSnapshotHash(), itemHash)
                 || !Objects.equals(review.getReviewContextHash(), contextHash)) {
             throw conflict("prescription changed after review, please review again");
         }
 
-        List<DrugEntity> drugs = request.items().stream()
+        List<DrugEntity> drugs = items.stream()
                 .map(item -> drugRepository.findByIdAndStatus(item.drugId(), ACTIVE)
                         .orElseThrow(() -> notFound("drug not found: " + item.drugId())))
                 .toList();
@@ -901,8 +990,8 @@ public class WorkflowService {
         prescription.setStatus("SUBMITTED");
         prescription = prescriptionRepository.save(prescription);
 
-        for (int i = 0; i < request.items().size(); i++) {
-            prescriptionItemRepository.save(toPrescriptionItem(prescription.getId(), request.items().get(i), drugs.get(i)));
+        for (int i = 0; i < items.size(); i++) {
+            prescriptionItemRepository.save(toPrescriptionItem(prescription.getId(), items.get(i), drugs.get(i)));
         }
 
         review.setPrescriptionId(prescription.getId());
@@ -931,6 +1020,19 @@ public class WorkflowService {
         return prescriptionRepository.findByDoctorIdOrderByCreatedAtDesc(doctorId).stream()
                 .map(this::toPrescriptionSummary)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PrescriptionSummary getPrescription(ActorContext actorContext, Long prescriptionId) {
+        PrescriptionEntity prescription = prescriptionRepository.findById(prescriptionId)
+                .orElseThrow(() -> notFound("prescription not found"));
+        if (actorContext == null
+                || !(actorContext.isAdmin()
+                || (actorContext.isPatient() && Objects.equals(prescription.getPatientId(), actorContext.patientId()))
+                || (actorContext.isDoctor() && Objects.equals(prescription.getDoctorId(), actorContext.doctorId())))) {
+            throw new ApiException(HttpStatus.FORBIDDEN.value(), "prescription permission required");
+        }
+        return toPrescriptionSummary(prescription);
     }
 
     @Transactional(readOnly = true)
@@ -1284,24 +1386,70 @@ public class WorkflowService {
         return actorContext.getRequiredDoctorId();
     }
 
-    private DepartmentEntity pickDepartment(String complaint) {
-        String normalized = complaint.toLowerCase(Locale.ROOT);
+    private DepartmentEntity pickExpandedDepartment(String complaint) {
+        String normalized = complaint == null ? "" : complaint.toLowerCase(Locale.ROOT);
         String code;
-        if (containsAny(normalized, "胸", "心", "气短", "心悸", "血压", "胸闷")) {
+        if (containsAny(normalized, "胸痛", "胸闷", "心悸", "心慌", "血压高", "高血压", "血压异常", "心绞痛", "心衰", "心律失常")) {
             code = "cardiology";
-        } else if (containsAny(normalized, "头", "眩", "晕", "抽搐", "癫痫", "中风", "失眠", "记忆", "帕金森", "偏瘫", "麻木")) {
+        } else if (containsAny(normalized, "头痛", "眩晕", "抽搐", "癫痫", "中风", "麻木", "失眠", "记忆", "帕金森", "脑梗", "脑出血")) {
             code = "neurology";
-        } else if (containsAny(normalized, "骨", "关节", "腰痛", "腿痛", "扭伤", "颈椎", "腰椎", "骨折", "脱臼", "韧带")) {
+        } else if (containsAny(normalized, "骨折", "关节痛", "腰痛", "腰腿痛", "扭伤", "颈椎", "脊柱", "骨痛", "运动损伤", "肩痛")) {
             code = "orthopedics";
-        } else if (containsAny(normalized, "皮疹", "过敏", "皮肤", "痒", "红肿", "痤疮", "湿疹", "荨麻疹", "银屑", "脱发", "斑")) {
+        } else if (containsAny(normalized, "皮疹", "过敏", "皮肤", "瘙痒", "痤疮", "湿疹", "荨麻疹", "银屑病", "真菌感染", "脱发")) {
             code = "dermatology";
+        } else if (containsAny(normalized, "儿童", "小孩", "孩子", "宝宝", "婴儿", "儿科", "生长发育", "疫苗", "发育迟缓")) {
+            code = "pediatrics";
+        } else if (containsAny(normalized, "咳嗽", "咳痰", "气短", "喘", "喘息", "呼吸困难", "肺炎", "慢阻肺", "支气管", "哮喘")) {
+            code = "respiratory-medicine";
+        } else if (containsAny(normalized, "腹痛", "腹泻", "腹胀", "反酸", "胃痛", "胃胀", "恶心", "呕吐", "便血", "黑便", "消化不良")) {
+            code = "gastroenterology";
+        } else if (containsAny(normalized, "糖尿病", "甲状腺", "血糖", "血脂", "肥胖", "多饮", "多尿", "消瘦", "代谢", "内分泌")) {
+            code = "endocrinology";
+        } else if (containsAny(normalized, "耳鸣", "听力下降", "耳痛", "鼻塞", "流涕", "咽痛", "声音嘶哑", "喉咙痛", "鼻窦炎", "扁桃体")) {
+            code = "otolaryngology";
+        } else if (containsAny(normalized, "视力下降", "视物模糊", "眼红", "眼痛", "干眼", "流泪", "结膜炎", "白内障", "青光眼")) {
+            code = "ophthalmology";
+        } else if (containsAny(normalized, "尿频", "尿急", "尿痛", "血尿", "排尿", "结石", "前列腺", "腰酸", "肾绞痛", "泌尿")) {
+            code = "urology";
+        } else if (containsAny(normalized, "月经", "白带", "阴道", "盆腔", "妇科", "妊娠", "怀孕", "孕产", "阴道出血", "经期")) {
+            code = "gynecology";
         } else {
-            // All other internal medicine symptoms: respiratory, gastrointestinal, general
             code = "internal-medicine";
         }
         return departmentRepository.findByCode(code)
                 .or(() -> departmentRepository.findByStatusOrderByNameAsc(ACTIVE).stream().findFirst())
                 .orElseThrow(() -> notFound("no active department configured"));
+    }
+
+    private DepartmentEntity pickDepartment(String complaint) {
+        return pickExpandedDepartment(complaint);
+    }
+
+    private Optional<DepartmentEntity> resolveActiveDepartment(String code, String name) {
+        String normalizedCode = blankToNull(code);
+        if (normalizedCode != null) {
+            Optional<DepartmentEntity> byCode = departmentRepository.findByCode(normalizedCode)
+                    .filter(department -> ACTIVE.equals(department.getStatus()));
+            if (byCode.isPresent()) {
+                return byCode;
+            }
+        }
+
+        String normalizedName = blankToNull(name);
+        if (normalizedName == null) {
+            return Optional.empty();
+        }
+        List<DepartmentEntity> activeDepartments = departmentRepository.findByStatusOrderByNameAsc(ACTIVE);
+        Optional<DepartmentEntity> exactMatch = activeDepartments.stream()
+                .filter(department -> department.getName().equals(normalizedName)
+                        || department.getCode().equalsIgnoreCase(normalizedName))
+                .findFirst();
+        if (exactMatch.isPresent()) {
+            return exactMatch;
+        }
+        return activeDepartments.stream()
+                .filter(department -> normalizedName.contains(department.getName()))
+                .findFirst();
     }
 
     private boolean containsAny(String text, String... words) {
@@ -1314,8 +1462,9 @@ public class WorkflowService {
     }
 
     private String buildTriageReason(String complaint, DepartmentEntity department, List<DoctorOption> doctors) {
-        String doctorText = doctors.isEmpty() ? "暂无可推荐医生，请手动选择号源。" :
-                "推荐医生：" + doctors.stream().map(DoctorOption::name).collect(Collectors.joining("、")) + "。";
+        String doctorText = doctors.isEmpty()
+                ? "暂无可推荐医生，请手动选择号源。"
+                : "推荐医生：" + doctors.stream().map(DoctorOption::name).collect(Collectors.joining("、")) + "。";
         return "根据主诉“" + complaint + "”，本地分诊规则建议优先前往" + department.getName()
                 + "。理由：症状关键词与该科室常见就诊范围匹配。" + doctorText;
     }
@@ -1444,7 +1593,7 @@ public class WorkflowService {
             }
         }
         if (hits.isEmpty()) {
-            hits.add("未命中中高风险本地规则，仍需医生结合患者情况确认。");
+            hits.add("未命中高风险本地规则，仍需医生结合患者情况确认。");
         }
         String missing = medicalRecordRepository.findFirstByRegistrationIdOrderByVersionDesc(registration.getId()).isPresent()
                 ? ""
@@ -1660,6 +1809,29 @@ public class WorkflowService {
                 false,
                 bindStatus,
                 items
+        );
+    }
+
+    private DiagnosisSuggestionRecordEntity requireDoctorDiagnosisSuggestion(Long suggestionId, Long doctorId) {
+        DiagnosisSuggestionRecordEntity entity = diagnosisSuggestionRepository.findById(suggestionId)
+                .orElseThrow(() -> notFound("diagnosis suggestion not found"));
+        if (!Objects.equals(entity.getDoctorId(), doctorId)) {
+            throw new ApiException(HttpStatus.FORBIDDEN.value(), "diagnosis suggestion permission required");
+        }
+        return entity;
+    }
+
+    private DiagnosisSuggestionResponse toDiagnosisSuggestionResponse(DiagnosisSuggestionRecordEntity entity,
+                                                                      String summary,
+                                                                      boolean degraded) {
+        return new DiagnosisSuggestionResponse(
+                entity.getId(),
+                entity.getRegistrationId(),
+                entity.getSuggestedDiagnoses(),
+                entity.getSuggestedExamItems(),
+                entity.getAdoptionStatus(),
+                summary,
+                degraded
         );
     }
 
@@ -2001,13 +2173,13 @@ public class WorkflowService {
         }
         String normalized = text.trim();
         int index = -1;
-        for (String delimiter : List.of("。", ".", "\n", "；", ";")) {
+        for (String delimiter : List.of("\n", "\r", ".", "。", "?", "？", ";", "；", "!", "！")) {
             int found = normalized.indexOf(delimiter);
             if (found >= 0 && (index < 0 || found < index)) {
                 index = found;
             }
         }
-        return index > 0 ? normalized.substring(0, index + 1) : normalized;
+        return index >= 0 ? normalized.substring(0, index + 1) : normalized;
     }
 
     private String inferDiagnosis(String text) {
@@ -2086,8 +2258,19 @@ public class WorkflowService {
         return new ApiException(HttpStatus.NOT_FOUND.value(), message);
     }
 
+    private ApiException badRequest(String message) {
+        return new ApiException(HttpStatus.BAD_REQUEST.value(), message);
+    }
+
     private ApiException conflict(String message) {
         return new ApiException(HttpStatus.CONFLICT.value(), message);
+    }
+
+    private List<PrescriptionItemRequest> requirePrescriptionItems(List<PrescriptionItemRequest> items) {
+        if (items == null || items.isEmpty()) {
+            throw badRequest("please add at least one prescription item before review or submit");
+        }
+        return items;
     }
 
     private record ReviewComputation(
@@ -2099,3 +2282,5 @@ public class WorkflowService {
     ) {
     }
 }
+
+

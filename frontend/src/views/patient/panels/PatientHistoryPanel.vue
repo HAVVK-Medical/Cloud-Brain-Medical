@@ -23,14 +23,26 @@ const { workspace } = defineProps<{ workspace: any }>();
 
     <SectionCard title="挂号历史">
       <div v-if="workspace.registrations.length" class="space-y-2">
-        <div v-for="reg in workspace.registrations" :key="reg.id" class="py-2 border-b border-border last:border-b-0 text-sm flex justify-between">
-          <div>
+        <div v-for="reg in workspace.registrations" :key="reg.id" class="py-2 border-b border-border last:border-b-0 text-sm flex justify-between gap-3">
+          <div class="min-w-0">
             <span class="font-medium">{{ workspace.formatDate(reg.workDate) }}</span>
             <span class="text-text-secondary"> · {{ reg.doctorName }}</span>
+            <p class="text-xs text-text-secondary mt-0.5">{{ reg.departmentName }}</p>
           </div>
-          <StatusChip :tone="reg.status === 'CANCELLED' ? 'danger' : reg.status === 'COMPLETED' ? 'success' : 'info'">
-            {{ reg.status === 'WAITING' ? '待就诊' : reg.status === 'COMPLETED' ? '已完成' : reg.status === 'CANCELLED' ? '已取消' : reg.status }}
-          </StatusChip>
+          <div class="flex items-center gap-2 shrink-0">
+            <StatusChip :tone="reg.status === 'CANCELLED' ? 'danger' : reg.status === 'COMPLETED' ? 'success' : 'info'">
+              {{ reg.status === 'WAITING' ? '待就诊' : reg.status === 'COMPLETED' ? '已完成' : reg.status === 'CANCELLED' ? '已取消' : reg.status }}
+            </StatusChip>
+            <button
+              v-if="reg.status === 'WAITING'"
+              type="button"
+              class="btn-ghost !px-2 !py-1 !text-xs !text-danger"
+              :disabled="workspace.canceling"
+              @click="workspace.requestCancelWaitingRegistration(reg.id)"
+            >
+              取消挂号
+            </button>
+          </div>
         </div>
       </div>
       <EmptyState v-else icon="calendar" title="暂无挂号历史" />

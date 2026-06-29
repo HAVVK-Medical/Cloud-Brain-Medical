@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue';
-import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, ArrowRight } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
+import { MessageCircle, Send, Loader2, Bot, ChevronDown, ChevronUp, ArrowRight } from 'lucide-vue-next';
 import { createSession, getMessages, buildStreamUrl } from '@/api/triage-conversation';
+import { triageConsult } from '@/api/workflow';
 import type { ChatMessage } from '@/types/chat';
 
 interface ParsedResult {
@@ -12,12 +14,16 @@ interface ParsedResult {
   suggestedQuestions: string[];
 }
 
+type ConversationMessage = { role: 'USER' | 'ASSISTANT' | 'SYSTEM'; content: string };
+
 const { workspace } = defineProps<{ workspace: any }>();
+const router = useRouter();
 
 const expanded = ref(false);
-const messages = ref<{ role: 'USER' | 'ASSISTANT' | 'SYSTEM'; content: string }[]>([]);
+const messages = ref<ConversationMessage[]>([]);
 const inputText = ref('');
 const streaming = ref(false);
+const confirming = ref(false);
 const sessionId = ref<number | null>(null);
 const finalResult = ref<ParsedResult | null>(null);
 const error = ref('');
@@ -27,27 +33,178 @@ function toggle() {
   expanded.value = !expanded.value;
 }
 
+function parseSuggestedQuestions(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter(Boolean);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function renderSimpleMarkdown(text: string): string {
+  if (!text) return '';
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+}
+
+function renderConversationText(text: string): string {
+  const { cleanText } = parseResultMarker(text);
+  return renderSimpleMarkdown(cleanText);
+}
+
+function parseChunkData(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as { content?: string };
+    if (typeof parsed.content === 'string') {
+      return parsed.content;
+    }
+  } catch {
+    // fallback to raw text
+  }
+  return value;
+}
+
+function decodeJsonString(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`) as string;
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\n/g, '\n');
+  }
+}
+
+function extractStringField(raw: string, fieldNames: string[]): string {
+  for (const fieldName of fieldNames) {
+    const match = raw.match(new RegExp(`"${fieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, 'u'));
+    if (match?.[1]) {
+      return decodeJsonString(match[1]);
+    }
+  }
+  return '';
+}
+
+function extractStringArrayField(raw: string, fieldNames: string[]): string[] {
+  for (const fieldName of fieldNames) {
+    const match = raw.match(new RegExp(`"${fieldName}"\\s*:\\s*\\[([\\s\\S]*?)\\]`, 'u'));
+    if (!match?.[1]) {
+      continue;
+    }
+    return Array.from(match[1].matchAll(/"((?:\\.|[^"\\])*)"/gu))
+      .map((item) => decodeJsonString(item[1]))
+      .filter(Boolean);
+  }
+  const textValue = extractStringField(raw, fieldNames);
+  return textValue ? [textValue] : [];
+}
+
+function parseResultMarkerFallback(raw: string): ParsedResult | null {
+  const department = extractStringField(raw, ['department', 'recommendedDepartment']);
+  const reason = extractStringField(raw, ['reason']);
+  if (!department && !reason) {
+    return null;
+  }
+  return {
+    department,
+    departmentCode: extractStringField(raw, ['departmentCode', 'recommendedDepartmentCode']),
+    reason,
+    urgencyLevel: extractStringField(raw, ['urgencyLevel']) || 'normal',
+    suggestedQuestions: extractStringArrayField(raw, ['suggestedQuestions']),
+  };
+}
+
+async function fallbackToQuickTriage() {
+  const chiefComplaint = messages.value
+    .filter((msg) => msg.role === 'USER')
+    .map((msg) => msg.content)
+    .join('\n')
+    .trim();
+  if (!chiefComplaint) {
+    return;
+  }
+  try {
+    const result = await triageConsult({ chiefComplaint });
+    finalResult.value = {
+      department: result.recommendedDept,
+      departmentCode: '',
+      reason: result.reason,
+      urgencyLevel: 'normal',
+      suggestedQuestions: [],
+    };
+    if (!messages.value.some((msg) => msg.role === 'ASSISTANT' && msg.content.includes(result.recommendedDept))) {
+      messages.value.push({
+        role: 'ASSISTANT',
+        content: `快速分诊已完成，建议前往 ${result.recommendedDept}。`,
+      });
+    }
+    error.value = 'AI 服务暂时不可用，已切换为快速分诊。';
+  } catch {
+    error.value = 'AI 服务暂时不可用，快速分诊也未能完成，请稍后重试或手动选择科室挂号。';
+  }
+}
+
 function parseResultMarker(text: string): { cleanText: string; result: ParsedResult | null } {
   const marker = /\[TRIAGE_RESULT\]([\s\S]*?)\[\/TRIAGE_RESULT\]/;
   const match = text.match(marker);
-  if (!match) return { cleanText: text, result: null };
+  if (!match) {
+    return {
+      cleanText: text.replace(/\[TRIAGE_RESULT\][\s\S]*$/u, '').trim(),
+      result: null,
+    };
+  }
 
   const cleanText = text.replace(marker, '').trim();
+  const rawResult = match[1].trim();
   try {
-    const parsed = JSON.parse(match[1]);
+    const parsed = JSON.parse(rawResult) as Record<string, unknown>;
     return {
       cleanText,
       result: {
-        department: parsed.department || '',
-        departmentCode: parsed.departmentCode || '',
-        reason: parsed.reason || '',
-        urgencyLevel: parsed.urgencyLevel || 'normal',
-        suggestedQuestions: parsed.suggestedQuestions || [],
+        department: String(parsed.department || parsed.recommendedDepartment || ''),
+        departmentCode: String(parsed.departmentCode || parsed.recommendedDepartmentCode || ''),
+        reason: String(parsed.reason || ''),
+        urgencyLevel: String(parsed.urgencyLevel || 'normal'),
+        suggestedQuestions: parseSuggestedQuestions(parsed.suggestedQuestions),
       },
     };
   } catch {
-    return { cleanText, result: null };
+    return { cleanText, result: parseResultMarkerFallback(rawResult) };
   }
+}
+
+function applyAssistantContent(message: ConversationMessage, rawContent: string) {
+  const { cleanText, result } = parseResultMarker(rawContent);
+  message.content = cleanText;
+  if (result) {
+    finalResult.value = result;
+  }
+}
+
+function normalizeHistory(history: ChatMessage[]) {
+  const normalized: ConversationMessage[] = [];
+  for (const item of history) {
+    const role = item.role as 'USER' | 'ASSISTANT';
+    if (role !== 'ASSISTANT') {
+      normalized.push({ role, content: item.content });
+      continue;
+    }
+    const message: ConversationMessage = { role: 'ASSISTANT', content: item.content };
+    applyAssistantContent(message, item.content);
+    if (message.content || !finalResult.value) {
+      normalized.push(message);
+    }
+  }
+  return normalized;
 }
 
 function scrollToBottom() {
@@ -71,10 +228,7 @@ async function startConversation() {
       const session = await createSession(userText);
       sessionId.value = session.id;
       const history = await getMessages(session.id);
-      messages.value = history.map((m: ChatMessage) => ({
-        role: m.role as 'USER' | 'ASSISTANT',
-        content: m.content,
-      }));
+      messages.value = normalizeHistory(history);
     } else {
       messages.value.push({ role: 'USER', content: userText });
     }
@@ -86,17 +240,28 @@ async function startConversation() {
 
   // Start SSE stream
   streaming.value = true;
-  const assistantMsg: { role: 'ASSISTANT' | 'SYSTEM'; content: string } = { role: 'ASSISTANT', content: '' };
+  const assistantMsg: ConversationMessage = { role: 'ASSISTANT', content: '' };
+  let rawAssistantContent = '';
   messages.value.push(assistantMsg);
   scrollToBottom();
 
   const url = buildStreamUrl(sessionId.value!, userText);
-  const es = new EventSource(url);
+  let es: EventSource;
+  try {
+    es = new EventSource(url);
+  } catch {
+    streaming.value = false;
+    assistantMsg.content = 'AI 服务暂时不可用，请使用快速分诊或稍后重试。';
+    error.value = assistantMsg.content;
+    await fallbackToQuickTriage();
+    scrollToBottom();
+    return;
+  }
   eventSource.value = es;
 
   es.addEventListener('chunk', (event) => {
-    const data = JSON.parse(event.data);
-    assistantMsg.content += data.content;
+    rawAssistantContent += parseChunkData(event.data);
+    applyAssistantContent(assistantMsg, rawAssistantContent);
     scrollToBottom();
   });
 
@@ -105,13 +270,7 @@ async function startConversation() {
     es.close();
     eventSource.value = null;
 
-    // Parse result marker
-    const { cleanText, result } = parseResultMarker(assistantMsg.content);
-    if (result) {
-      finalResult.value = result;
-      assistantMsg.content = cleanText;
-      messages.value.push({ role: 'SYSTEM', content: '' }); // placeholder for result card
-    }
+    applyAssistantContent(assistantMsg, rawAssistantContent || assistantMsg.content);
     scrollToBottom();
   });
 
@@ -119,10 +278,17 @@ async function startConversation() {
     streaming.value = false;
     es.close();
     eventSource.value = null;
+    applyAssistantContent(assistantMsg, rawAssistantContent || assistantMsg.content);
+    if (finalResult.value) {
+      error.value = '';
+      scrollToBottom();
+      return;
+    }
     if (!assistantMsg.content) {
       assistantMsg.content = 'AI 服务暂时不可用，请使用快速分诊或稍后重试。';
     }
     error.value = assistantMsg.content;
+    void fallbackToQuickTriage().finally(scrollToBottom);
     scrollToBottom();
   });
 }
@@ -143,9 +309,30 @@ function reset() {
   expanded.value = false;
 }
 
-function goToRegistration() {
-  workspace.selectedDepartmentId = null; // trigger re-select
-  workspace.$router?.push('/patient/registration');
+async function goToRegistration() {
+  if (!finalResult.value) return;
+
+  confirming.value = true;
+  error.value = '';
+  try {
+    const chiefComplaint = messages.value
+      .filter((msg) => msg.role === 'USER')
+      .map((msg) => msg.content)
+      .join('\n')
+      .trim();
+    await workspace.confirmConversationTriageResult({
+      chiefComplaint: chiefComplaint || finalResult.value.reason || finalResult.value.department,
+      department: finalResult.value.department,
+      departmentCode: finalResult.value.departmentCode,
+      reason: finalResult.value.reason,
+      urgencyLevel: finalResult.value.urgencyLevel,
+    });
+    await router.push('/patient/registration');
+  } catch {
+    error.value = error.value || '对话分诊确认失败，请稍后重试。';
+  } finally {
+    confirming.value = false;
+  }
 }
 
 // Cleanup
@@ -210,12 +397,12 @@ watch(expanded, (val) => {
           </div>
 
           <!-- Assistant message -->
-          <div v-else-if="msg.role === 'ASSISTANT'" class="flex gap-2">
+          <div v-else-if="msg.role === 'ASSISTANT' && msg.content" class="flex gap-2">
             <div class="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center flex-shrink-0 mt-1">
               <Bot :size="12" class="text-brand" />
             </div>
-            <div class="max-w-[85%] bg-gray-100 rounded-2xl rounded-bl-md px-3 py-2 text-sm">
-              {{ msg.content }}
+            <div class="max-w-[85%] bg-gray-100 rounded-2xl rounded-bl-md px-3 py-2 text-sm whitespace-pre-wrap">
+              <span v-html="renderConversationText(msg.content)" />
               <span v-if="streaming && i === messages.length - 1" class="inline-block w-1.5 h-4 bg-brand animate-pulse ml-0.5 align-middle" />
             </div>
           </div>
@@ -234,9 +421,17 @@ watch(expanded, (val) => {
           <span class="font-semibold text-green-800">{{ finalResult.department }}</span>
           <span v-if="finalResult.urgencyLevel === 'urgent'" class="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">紧急</span>
         </div>
-        <p class="text-xs text-green-700">{{ finalResult.reason }}</p>
-        <button class="btn-primary w-full !py-2 !text-sm" @click="goToRegistration">
-          去挂号 <ArrowRight :size="14" />
+        <p class="text-xs text-green-700" v-html="renderSimpleMarkdown(finalResult.reason)" />
+        <div v-if="finalResult.suggestedQuestions.length" class="space-y-1">
+          <p class="text-xs font-medium text-green-800">可以继续咨询</p>
+          <p v-for="question in finalResult.suggestedQuestions" :key="question" class="text-xs text-green-700">
+            <span v-html="renderSimpleMarkdown(question)" />
+          </p>
+        </div>
+        <button class="btn-primary w-full !py-2 !text-sm" :disabled="confirming" @click="goToRegistration">
+          <Loader2 v-if="confirming" :size="14" class="animate-spin" />
+          <span>{{ confirming ? '正在生成挂号推荐' : '去挂号' }}</span>
+          <ArrowRight v-if="!confirming" :size="14" />
         </button>
       </div>
 

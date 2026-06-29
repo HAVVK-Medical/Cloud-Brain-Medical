@@ -10,9 +10,12 @@ import {
 } from 'lucide-vue-next';
 import SideNav from '@/components/layout/SideNav.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
+import { usePagination } from '@/composables/usePagination';
 import AdminEditorPanel from './panels/AdminEditorPanel.vue';
+import { useRoute } from 'vue-router';
 
 import {
+  adminBatchCreateSchedules,
   adminListDepartments,
   adminListDoctors,
   adminListDrugs,
@@ -59,6 +62,7 @@ import type {
   AiConfigWriteRequest,
   AiUsageStats,
   AuditLogSummary,
+  BatchScheduleRequest,
   DashboardOverview,
   DashboardTrendPoint,
   DepartmentOption,
@@ -81,8 +85,11 @@ import type {
 import { resolveUiErrorMessage } from '@/utils/zh';
 
 type ResourceKind = 'department' | 'doctor' | 'schedule' | 'drug' | 'rule' | 'ai' | 'prompt';
+type CurrentKind = ResourceKind | '';
+type AiRecordTaskType = 'ALL' | 'TRIAGE' | 'MEDICAL_RECORD' | 'DIAGNOSIS' | 'PRESCRIPTION_REVIEW';
 
 const authStore = useAuthStore();
+const route = useRoute();
 
 const loading = ref(false);
 const saving = ref(false);
@@ -106,10 +113,13 @@ const notifications = ref<NotificationRecordSummary[]>([]);
 const departmentFilter = ref<number | null>(null);
 const doctorFilter = ref<number | null>(null);
 const drugKeyword = ref('');
-const currentKind = ref<ResourceKind>('department');
+const currentKind = ref<CurrentKind>('');
 const currentId = ref<number | null>(null);
 const notificationLoading = ref(false);
 const ackingNotificationId = ref<number | null>(null);
+const batchCreatingSchedules = ref(false);
+const batchScheduleMessage = ref('');
+const aiRecordTaskType = ref<AiRecordTaskType>('ALL');
 const notificationSocketState = ref<'idle' | 'connecting' | 'connected' | 'closed'>('idle');
 let notificationSocket: WebSocket | null = null;
 
@@ -135,10 +145,23 @@ const doctorForm = reactive<DoctorWriteRequest>({
 const scheduleForm = reactive<ScheduleWriteRequest>({
   doctorId: 0,
   departmentId: 0,
-  workDate: new Date().toISOString().slice(0, 10),
+  workDate: toDateInputValue(new Date()),
   period: '上午',
   totalSlots: 20,
   remainingSlots: 20,
+  visitLevel: '普通门诊',
+  status: 'ACTIVE',
+});
+
+const batchScheduleForm = reactive({
+  doctorId: 0,
+  departmentId: 0,
+  startDate: toDateInputValue(new Date()),
+  endDate: toDateInputValue(addDays(new Date(), 6)),
+  weekdays: [1, 2, 3, 4, 5] as number[],
+  periods: ['上午', '下午'] as string[],
+  totalSlots: 20,
+  remainingSlots: 20 as number | null,
   visitLevel: '普通门诊',
   status: 'ACTIVE',
 });
@@ -213,6 +236,49 @@ const visibleSchedules = computed(() =>
       (doctorFilter.value === null || item.doctorId === doctorFilter.value);
   }),
 );
+const paginatedDepartments = usePagination(computed(() => departments.value), 8);
+const paginatedDoctors = usePagination(computed(() => doctors.value), 8);
+const paginatedDrugs = usePagination(computed(() => drugs.value), 8);
+const paginatedRules = usePagination(computed(() => rules.value), 8);
+const paginatedAiConfigs = usePagination(computed(() => aiConfigs.value), 8);
+const paginatedPromptTemplates = usePagination(computed(() => promptTemplates.value), 8);
+const paginatedSchedules = usePagination(visibleSchedules, 8);
+const paginatedAiRecords = usePagination(computed(() => aiRecords.value), 8);
+const paginatedAuditLogs = usePagination(computed(() => auditLogs.value), 8);
+const batchSchedulePreviewDates = computed(() => {
+  if (!batchScheduleForm.startDate || !batchScheduleForm.endDate || batchScheduleForm.weekdays.length === 0) {
+    return [];
+  }
+  const start = new Date(`${batchScheduleForm.startDate}T00:00:00`);
+  const end = new Date(`${batchScheduleForm.endDate}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return [];
+  }
+  const selectedWeekdays = new Set(batchScheduleForm.weekdays);
+  const dates: string[] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    if (selectedWeekdays.has(cursor.getDay())) {
+      dates.push(toDateInputValue(cursor));
+    }
+  }
+  return dates;
+});
+const batchSchedulePreviewCount = computed(() => batchSchedulePreviewDates.value.length * batchScheduleForm.periods.length);
+const editorVisible = computed(() => {
+  if (!currentKind.value) {
+    return false;
+  }
+  if (route.name === 'admin-master-data') {
+    return ['department', 'doctor', 'drug'].includes(currentKind.value);
+  }
+  if (route.name === 'admin-resources') {
+    return currentKind.value === 'schedule';
+  }
+  if (route.name === 'admin-config') {
+    return ['rule', 'ai', 'prompt'].includes(currentKind.value);
+  }
+  return false;
+});
 const adminWorkspace = reactive({
   authStore,
   loading,
@@ -241,10 +307,14 @@ const adminWorkspace = reactive({
   currentId,
   notificationLoading,
   ackingNotificationId,
+  batchCreatingSchedules,
+  batchScheduleMessage,
+  aiRecordTaskType,
   notificationSocketState,
   departmentForm,
   doctorForm,
   scheduleForm,
+  batchScheduleForm,
   drugForm,
   ruleForm,
   aiForm,
@@ -254,8 +324,21 @@ const adminWorkspace = reactive({
   selectedDepartment,
   selectedDoctor,
   visibleSchedules,
+  paginatedDepartments,
+  paginatedDoctors,
+  paginatedDrugs,
+  paginatedRules,
+  paginatedAiConfigs,
+  paginatedPromptTemplates,
+  paginatedSchedules,
+  paginatedAiRecords,
+  paginatedAuditLogs,
+  batchSchedulePreviewDates,
+  batchSchedulePreviewCount,
+  editorVisible,
   formatDateTime,
   formatStatus,
+  formatPromptDeptCode,
   truncate,
   riskTone,
   loadDashboardBundle,
@@ -265,6 +348,9 @@ const adminWorkspace = reactive({
   connectNotificationSocket,
   closeNotificationSocket,
   ackNotification,
+  loadAiRecords,
+  changeAiRecordTaskType,
+  createBatchSchedules,
   syncCurrentSelection,
   saveCurrent,
   toggleCurrent,
@@ -277,6 +363,7 @@ const adminWorkspace = reactive({
   selectRule,
   selectAi,
   selectPrompt,
+  closeEditor,
 });
 
 function formatDateTime(value: string | null | undefined) {
@@ -288,6 +375,11 @@ function formatDateTime(value: string | null | undefined) {
 
 function formatStatus(value: string | null | undefined) {
   return value || 'UNKNOWN';
+}
+
+function formatPromptDeptCode(value: string | null | undefined) {
+  const code = value?.trim();
+  return code || '全局模板';
 }
 
 function truncate(value: string | null | undefined, length = 80) {
@@ -312,6 +404,19 @@ function riskTone(level: string | null | undefined) {
     return 'loading';
   }
   return 'healthy';
+}
+
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
 }
 
 function resetDepartmentForm(source?: DepartmentOption | null) {
@@ -341,7 +446,7 @@ function resetScheduleForm(source?: ScheduleOption | null) {
   Object.assign(scheduleForm, {
     doctorId: source?.doctorId ?? doctors.value[0]?.id ?? 0,
     departmentId: source?.departmentId ?? departments.value[0]?.id ?? 0,
-    workDate: source?.workDate ?? new Date().toISOString().slice(0, 10),
+    workDate: source?.workDate ?? toDateInputValue(new Date()),
     period: source?.period ?? '上午',
     totalSlots: source?.totalSlots ?? 20,
     remainingSlots: source?.remainingSlots ?? source?.totalSlots ?? 20,
@@ -409,7 +514,7 @@ function resetPromptForm(source?: PromptTemplateSummary | null) {
   Object.assign(promptForm, {
     templateCode: source?.templateCode ?? '',
     taskType: source?.taskType ?? 'TRIAGE',
-    deptCode: source?.deptCode ?? '',
+    deptCode: source?.deptCode?.trim() ?? '',
     templateBody: source?.templateBody ?? '',
     variableWhitelist: source?.variableWhitelist ?? '',
     version: source?.version ?? 1,
@@ -460,6 +565,11 @@ function selectPrompt(item: PromptTemplateSummary) {
   resetPromptForm(item);
 }
 
+function closeEditor() {
+  currentId.value = null;
+  currentKind.value = '';
+}
+
 function ensureDefaults() {
   if (!doctorForm.departmentId) {
     doctorForm.departmentId = departments.value[0]?.id ?? 0;
@@ -469,6 +579,29 @@ function ensureDefaults() {
   }
   if (!scheduleForm.doctorId) {
     scheduleForm.doctorId = doctors.value[0]?.id ?? 0;
+  }
+  if (!batchScheduleForm.departmentId) {
+    batchScheduleForm.departmentId = departments.value[0]?.id ?? 0;
+  }
+  if (!batchScheduleForm.doctorId) {
+    const defaultDoctor = doctors.value.find((item) => item.departmentId === batchScheduleForm.departmentId) ?? doctors.value[0];
+    batchScheduleForm.doctorId = defaultDoctor?.id ?? 0;
+  }
+}
+
+async function loadAiRecords() {
+  const taskType = aiRecordTaskType.value === 'ALL' ? null : aiRecordTaskType.value;
+  aiRecords.value = await listAiCallRecords(taskType);
+  paginatedAiRecords.resetPage();
+}
+
+async function changeAiRecordTaskType(taskType: AiRecordTaskType) {
+  aiRecordTaskType.value = taskType;
+  error.value = '';
+  try {
+    await loadAiRecords();
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, 'AI调用记录加载失败');
   }
 }
 
@@ -514,7 +647,7 @@ async function loadAll() {
       listPrescriptionRules(),
       listAiConfig(),
       listPromptTemplates(),
-      listAiCallRecords(),
+      listAiCallRecords(aiRecordTaskType.value === 'ALL' ? null : aiRecordTaskType.value),
       listAuditLogs(),
       listUnreadNotifications(),
     ]);
@@ -599,6 +732,55 @@ async function ackNotification(id: number) {
     error.value = resolveUiErrorMessage(cause, '标记告警已读失败');
   } finally {
     ackingNotificationId.value = null;
+  }
+}
+
+async function createBatchSchedules() {
+  error.value = '';
+  batchScheduleMessage.value = '';
+  if (!batchScheduleForm.departmentId || !batchScheduleForm.doctorId) {
+    error.value = '请选择科室和医生后再生成排班';
+    return;
+  }
+  if (!batchSchedulePreviewDates.value.length || !batchScheduleForm.periods.length) {
+    error.value = '请选择有效的日期范围、星期和时段';
+    return;
+  }
+  const totalSlots = Number(batchScheduleForm.totalSlots);
+  const remainingSlots = batchScheduleForm.remainingSlots === null || batchScheduleForm.remainingSlots === undefined || Number.isNaN(Number(batchScheduleForm.remainingSlots))
+    ? null
+    : Number(batchScheduleForm.remainingSlots);
+  if (!Number.isInteger(totalSlots) || totalSlots < 1) {
+    error.value = '总号源必须是大于 0 的整数';
+    return;
+  }
+  if (remainingSlots !== null && (!Number.isInteger(remainingSlots) || remainingSlots < 0)) {
+    error.value = '剩余号源必须是非负整数';
+    return;
+  }
+  if (remainingSlots !== null && remainingSlots > totalSlots) {
+    error.value = '剩余号源不能大于总号源';
+    return;
+  }
+  const payload: BatchScheduleRequest = {
+    doctorId: batchScheduleForm.doctorId,
+    departmentId: batchScheduleForm.departmentId,
+    workDates: batchSchedulePreviewDates.value,
+    periods: batchScheduleForm.periods,
+    totalSlots,
+    remainingSlots,
+    visitLevel: batchScheduleForm.visitLevel.trim(),
+    status: batchScheduleForm.status.trim(),
+  };
+  batchCreatingSchedules.value = true;
+  try {
+    const created = await adminBatchCreateSchedules(payload);
+    batchScheduleMessage.value = `已生成 ${created.length} 条排班`;
+    await loadAll();
+  } catch (cause) {
+    error.value = resolveUiErrorMessage(cause, '批量生成排班失败');
+  } finally {
+    batchCreatingSchedules.value = false;
   }
 }
 
@@ -689,12 +871,20 @@ async function saveCurrent() {
         ? await adminUpdateAiConfig(currentId.value, payload)
         : await adminCreateAiConfig(payload);
       savedId = saved.id;
-    } else {
-      const payload = { ...promptForm, templateCode: promptForm.templateCode.trim(), taskType: promptForm.taskType.trim(), status: promptForm.status.trim() } satisfies PromptTemplateWriteRequest;
+    } else if (currentKind.value === 'prompt') {
+      const payload = {
+        ...promptForm,
+        templateCode: promptForm.templateCode.trim(),
+        taskType: promptForm.taskType.trim(),
+        deptCode: promptForm.deptCode?.trim() || null,
+        status: promptForm.status.trim(),
+      } satisfies PromptTemplateWriteRequest;
       const saved = currentId.value
         ? await adminUpdatePromptTemplate(currentId.value, payload)
         : await adminCreatePromptTemplate(payload);
       savedId = saved.id;
+    } else {
+      return;
     }
     currentId.value = savedId;
     await loadAll();
@@ -752,11 +942,53 @@ function clearFilters() {
   departmentFilter.value = null;
   doctorFilter.value = null;
   drugKeyword.value = '';
+  paginatedDepartments.resetPage();
+  paginatedDoctors.resetPage();
+  paginatedDrugs.resetPage();
+  paginatedRules.resetPage();
+  paginatedAiConfigs.resetPage();
+  paginatedPromptTemplates.resetPage();
+  paginatedSchedules.resetPage();
+  paginatedAiRecords.resetPage();
+  paginatedAuditLogs.resetPage();
   void loadAll();
 }
 
 watch([departments, doctors], () => {
   ensureDefaults();
+});
+
+watch(() => batchScheduleForm.doctorId, (doctorId) => {
+  const doctor = doctors.value.find((item) => item.id === doctorId);
+  if (doctor?.departmentId && batchScheduleForm.departmentId !== doctor.departmentId) {
+    batchScheduleForm.departmentId = doctor.departmentId;
+  }
+});
+
+watch(() => batchScheduleForm.departmentId, (departmentId) => {
+  const currentDoctor = doctors.value.find((item) => item.id === batchScheduleForm.doctorId);
+  if (currentDoctor?.departmentId === departmentId) {
+    return;
+  }
+  batchScheduleForm.doctorId = doctors.value.find((item) => item.departmentId === departmentId)?.id ?? doctors.value[0]?.id ?? 0;
+});
+
+watch([departmentFilter, doctorFilter, drugKeyword], () => {
+  paginatedDepartments.resetPage();
+  paginatedDoctors.resetPage();
+  paginatedDrugs.resetPage();
+  paginatedRules.resetPage();
+  paginatedAiConfigs.resetPage();
+  paginatedPromptTemplates.resetPage();
+  paginatedSchedules.resetPage();
+  paginatedAiRecords.resetPage();
+  paginatedAuditLogs.resetPage();
+});
+
+watch(() => route.name, () => {
+  if (!editorVisible.value) {
+    closeEditor();
+  }
 });
 
 onMounted(() => {
@@ -803,7 +1035,7 @@ onBeforeUnmount(() => {
         </Suspense>
       </RouterView>
 
-      <AdminEditorPanel :workspace="adminWorkspace" v-if="adminWorkspace.currentKind" />
+      <AdminEditorPanel :workspace="adminWorkspace" v-if="adminWorkspace.editorVisible" />
     </div>
   </div>
 </template>

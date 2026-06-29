@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { Sparkles, ArrowRight } from 'lucide-vue-next';
 import SectionCard from '@/components/shared/SectionCard.vue';
-import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
 import ConversationalTriageSection from './ConversationalTriageSection.vue';
 

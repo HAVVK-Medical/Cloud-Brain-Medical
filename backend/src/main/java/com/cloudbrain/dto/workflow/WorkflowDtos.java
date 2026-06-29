@@ -96,6 +96,15 @@ public final class WorkflowDtos {
     ) {
     }
 
+    public record ConversationTriageConfirmRequest(
+            @NotBlank @Size(max = 1000) String chiefComplaint,
+            @Size(max = 128) String department,
+            @Size(max = 64) String departmentCode,
+            @Size(max = 2000) String reason,
+            @Size(max = 32) String urgencyLevel
+    ) {
+    }
+
     public record RegistrationCreateRequest(
             @NotNull Long scheduleId,
             Long triageRecordId
@@ -200,6 +209,16 @@ public final class WorkflowDtos {
             String adoptionStatus,
             String summary,
             boolean degraded
+    ) {
+    }
+
+    public record DiagnosisSuggestionAdoptRequest(
+            @NotBlank @Size(max = 1000) String finalDiagnosis
+    ) {
+    }
+
+    public record DiagnosisSuggestionIgnoreRequest(
+            @Size(max = 1000) String reason
     ) {
     }
 

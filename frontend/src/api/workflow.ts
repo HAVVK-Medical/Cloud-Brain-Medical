@@ -80,6 +80,14 @@ export type TriageResponse = {
   degraded: boolean;
 };
 
+export type ConversationTriageConfirmRequest = {
+  chiefComplaint: string;
+  department?: string | null;
+  departmentCode?: string | null;
+  reason?: string | null;
+  urgencyLevel?: string | null;
+};
+
 export type RegistrationCreateRequest = {
   scheduleId: number;
   triageRecordId?: number | null;
@@ -167,6 +175,14 @@ export type DiagnosisSuggestionResponse = {
   degraded: boolean;
 };
 
+export type DiagnosisSuggestionAdoptRequest = {
+  finalDiagnosis: string;
+};
+
+export type DiagnosisSuggestionIgnoreRequest = {
+  reason?: string | null;
+};
+
 export type PrescriptionItemRequest = {
   drugId: number;
   dosage: number;
@@ -174,6 +190,21 @@ export type PrescriptionItemRequest = {
   duration: string;
   quantity: number;
   usageInstruction?: string | null;
+};
+
+export type PrescriptionItemSummary = {
+  id: number | null;
+  drugId: number | null;
+  drugName: string | null;
+  specification: string | null;
+  dosageForm: string | null;
+  packageUnit: string | null;
+  unitPrice: number | null;
+  dosage: number | null;
+  frequency: string | null;
+  duration: string | null;
+  quantity: number | null;
+  usageInstruction: string | null;
 };
 
 export type PrescriptionReviewRequest = {
@@ -204,7 +235,7 @@ export type PrescriptionReviewResponse = {
   reviewContextHash: string | null;
   degraded: boolean | null;
   bindStatus: string | null;
-  items: unknown[];
+  items: PrescriptionItemSummary[];
 };
 
 export type PrescriptionSummary = {
@@ -218,7 +249,7 @@ export type PrescriptionSummary = {
   status: string;
   riskLevel: string | null;
   reviewId: number | null;
-  items: unknown[];
+  items: PrescriptionItemSummary[];
   review: PrescriptionReviewResponse | null;
   createdAt: string | null;
 };
@@ -491,6 +522,17 @@ export type ScheduleWriteRequest = {
   status: string;
 };
 
+export type BatchScheduleRequest = {
+  doctorId: number;
+  departmentId: number;
+  workDates: string[];
+  periods: string[];
+  totalSlots: number;
+  remainingSlots?: number | null;
+  visitLevel: string;
+  status: string;
+};
+
 export type DrugWriteRequest = {
   code: string;
   name: string;
@@ -607,6 +649,10 @@ export async function adminCreateSchedule(payload: ScheduleWriteRequest) {
   return unwrap((await http.post<Result<ScheduleOption>>('/admin/schedules', payload)).data);
 }
 
+export async function adminBatchCreateSchedules(payload: BatchScheduleRequest) {
+  return unwrap((await http.post<Result<ScheduleOption[]>>('/admin/schedules/batch', payload)).data);
+}
+
 export async function adminUpdateSchedule(id: number, payload: ScheduleWriteRequest) {
   return unwrap((await http.put<Result<ScheduleOption>>(`/admin/schedules/${id}`, payload)).data);
 }
@@ -625,6 +671,10 @@ export async function updatePatientInfo(payload: PatientUpdateRequest) {
 
 export async function triageConsult(payload: TriageRequest) {
   return unwrap((await http.post<Result<TriageResponse>>('/triage/consult', payload)).data);
+}
+
+export async function confirmConversationTriage(payload: ConversationTriageConfirmRequest) {
+  return unwrap((await http.post<Result<TriageResponse>>('/triage/conversation/confirm', payload)).data);
 }
 
 export async function listTriageHistory() {
@@ -686,8 +736,20 @@ export async function searchDoctorMedicalRecords(keyword?: string) {
   );
 }
 
+export async function getMedicalRecord(id: number) {
+  return unwrap((await http.get<Result<MedicalRecordSummary>>(`/medical-record/${id}`)).data);
+}
+
 export async function diagnose(payload: DiagnosisSuggestionRequest) {
   return unwrap((await http.post<Result<DiagnosisSuggestionResponse>>('/diagnosis/suggest', payload)).data);
+}
+
+export async function adoptDiagnosisSuggestion(id: number, payload: DiagnosisSuggestionAdoptRequest) {
+  return unwrap((await http.patch<Result<DiagnosisSuggestionResponse>>(`/diagnosis/${id}/adopt`, payload)).data);
+}
+
+export async function ignoreDiagnosisSuggestion(id: number, payload?: DiagnosisSuggestionIgnoreRequest) {
+  return unwrap((await http.patch<Result<DiagnosisSuggestionResponse>>(`/diagnosis/${id}/ignore`, payload ?? {})).data);
 }
 
 export async function reviewPrescription(payload: PrescriptionReviewRequest) {
@@ -705,6 +767,10 @@ export async function listPatientPrescriptions(patientId?: number) {
 
 export async function listDoctorPrescriptions() {
   return unwrap((await http.get<Result<PrescriptionSummary[]>>('/prescription/list/doctor')).data);
+}
+
+export async function getPrescription(id: number) {
+  return unwrap((await http.get<Result<PrescriptionSummary>>(`/prescription/${id}`)).data);
 }
 
 export async function searchDrugs(keyword?: string) {
@@ -803,8 +869,8 @@ export async function adminTogglePrescriptionRule(id: number) {
   return unwrap((await http.patch<Result<PrescriptionRuleSummary>>(`/admin/prescription-rules/${id}/toggle`)).data);
 }
 
-export async function listAiCallRecords() {
-  return unwrap((await http.get<Result<AiCallRecordSummary[]>>('/admin/ai-records')).data);
+export async function listAiCallRecords(taskType?: string | null) {
+  return unwrap((await http.get<Result<AiCallRecordSummary[]>>('/admin/ai-records', { params: { taskType } })).data);
 }
 
 export async function listPromptTemplates() {

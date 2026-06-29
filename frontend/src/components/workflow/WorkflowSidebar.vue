@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { X, ChevronRight, Stethoscope, Brain, ShieldCheck, Loader2, CheckCircle2, AlertCircle, Copy } from 'lucide-vue-next';
+import { X, Stethoscope, Brain, ShieldCheck, Loader2, CheckCircle2, AlertCircle } from 'lucide-vue-next';
 
 export interface WorkflowStep {
   id: string;
@@ -21,11 +21,15 @@ const emit = defineEmits<{
   (e: 'adopt', stepId: string): void;
 }>();
 
-const steps = ref<WorkflowStep[]>([
-  { id: 'MEDICAL_RECORD', label: 'AI 生成病历', icon: Stethoscope, status: 'idle', content: '' },
-  { id: 'DIAGNOSIS', label: 'AI 诊断建议', icon: Brain, status: 'idle', content: '' },
-  { id: 'PRESCRIPTION_REVIEW', label: 'AI 处方审核', icon: ShieldCheck, status: 'idle', content: '' },
-]);
+function createInitialSteps(): WorkflowStep[] {
+  return [
+    { id: 'MEDICAL_RECORD', label: 'AI 生成病历', icon: Stethoscope, status: 'idle', content: '' },
+    { id: 'DIAGNOSIS', label: 'AI 诊断建议', icon: Brain, status: 'idle', content: '' },
+    { id: 'PRESCRIPTION_REVIEW', label: 'AI 处方审核', icon: ShieldCheck, status: 'idle', content: '' },
+  ];
+}
+
+const steps = ref<WorkflowStep[]>(createInitialSteps());
 
 const activeStepId = ref<string | null>(null);
 
@@ -63,6 +67,11 @@ function setStepError(stepId: string, message: string) {
   }
 }
 
+function reset() {
+  steps.value = createInitialSteps();
+  activeStepId.value = null;
+}
+
 function adoptStep(stepId: string) {
   emit('adopt', stepId);
 }
@@ -76,7 +85,7 @@ function statusBadge(status: WorkflowStep['status']) {
   }
 }
 
-defineExpose({ steps, activeStepId, updateStepContent, setStepCompleted, setStepError });
+defineExpose({ steps, activeStepId, updateStepContent, setStepCompleted, setStepError, triggerStep, selectStep, reset });
 </script>
 
 <template>
