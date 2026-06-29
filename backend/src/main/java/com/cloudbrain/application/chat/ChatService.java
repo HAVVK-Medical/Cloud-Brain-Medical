@@ -111,6 +111,7 @@ public class ChatService {
         CompletableFuture.runAsync(() -> {
             try {
                 StringBuilder fullResponse = new StringBuilder();
+                StringBuilder fullThinking = new StringBuilder();
 
                 AIModels.ResolvedAIConfig config = configResolver.resolve(taskScope);
                 AIModels.ResolvedPromptTemplate template = promptTemplateService.resolve(taskScope, null,
@@ -120,7 +121,7 @@ public class ChatService {
                         || config.apiKey() == null || config.apiKey().isBlank()) {
                     String fallback = "抱歉，AI 服务暂时不可用，请稍后重试。";
                     fullResponse.append(fallback);
-                    sendChunk(emitter, fallback);
+                    sendChunk(emitter, "chunk", fallback);
                 } else {
                     List<AIModels.AIMessage> messages = new ArrayList<>();
                     messages.add(AIModels.AIMessage.system(template.body()));
@@ -152,10 +153,16 @@ public class ChatService {
                             1000,
                             messages
                     );
-                    provider.chatStream(request, chunk -> {
-                        fullResponse.append(chunk);
-                        sendChunk(emitter, chunk);
-                    });
+                    provider.chatStream(request,
+                        chunk -> {
+                            fullResponse.append(chunk);
+                            sendChunk(emitter, "chunk", chunk);
+                        },
+                        thinking -> {
+                            fullThinking.append(thinking);
+                            sendChunk(emitter, "thinking", thinking);
+                        }
+                    );
                 }
 
                 String responseText = fullResponse.toString();
@@ -171,6 +178,7 @@ public class ChatService {
                         metaJson = "{}";
                     }
                     ChatMessageEntity assistantMsg = new ChatMessageEntity(session, "ASSISTANT", responseText);
+                    assistantMsg.setThinkingContent(fullThinking.toString());
                     assistantMsg.setAiMeta(metaJson);
                     assistantMsg = messageRepo.save(assistantMsg);
 
@@ -187,7 +195,11 @@ public class ChatService {
                     try {
                         emitter.send(SseEmitter.event()
                                 .name("done")
-                                .data(Map.of("messageId", assistantMsg.getId(), "meta", meta)));
+                                .data(Map.of(
+                                    "messageId", assistantMsg.getId(),
+                                    "thinkingContent", fullThinking.toString(),
+                                    "meta", meta
+                                )));
                     } catch (IOException e) {
                         log.warn("Failed to send done event", e);
                     }
@@ -215,10 +227,10 @@ public class ChatService {
         return emitter;
     }
 
-    private void sendChunk(SseEmitter emitter, String chunk) {
+    private void sendChunk(SseEmitter emitter, String eventName, String chunk) {
         try {
             emitter.send(SseEmitter.event()
-                    .name("chunk")
+                    .name(eventName)
                     .data(Map.of("content", chunk)));
         } catch (IOException e) {
             throw new RuntimeException("SSE send failed", e);
