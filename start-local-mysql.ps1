@@ -1,8 +1,12 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$mysqlHome = 'C:\Program Files\MySQL\MySQL Server 9.7'
+if (-not (Test-Path env:MYSQL_HOME)) {
+  throw "MYSQL_HOME environment variable not set. Please set MYSQL_HOME to your MySQL installation directory.`nExample: `$env:MYSQL_HOME = 'D:\Program Files\MySQL\mysql-8.0.46-winx64'"
+}
+$mysqlHome = $env:MYSQL_HOME
 $mysqlData = Join-Path $repoRoot '.local-mysql\data'
+$mysqlUploads = Join-Path $repoRoot '.local-mysql\uploads'
 $mysqlConfig = Join-Path $repoRoot '.local-mysql\my-project.ini'
 $mysqlExe = Join-Path $mysqlHome 'bin\mysqld.exe'
 $mysqlClient = Join-Path $mysqlHome 'bin\mysql.exe'
@@ -11,9 +15,39 @@ if (-not (Test-Path $mysqlExe)) {
   throw "MySQL server not found at $mysqlExe"
 }
 
+# Generate my-project.ini dynamically with correct paths for this machine
+$mysqlBasedir = $mysqlHome.Replace('\', '/')
+$mysqlDatadir = $mysqlData.Replace('\', '/')
+$mysqlUploadsDir = $mysqlUploads.Replace('\', '/')
+$mysqlLogErr = (Join-Path $repoRoot '.local-mysql\mysql.err').Replace('\', '/')
+$mysqlPid = (Join-Path $repoRoot '.local-mysql\mysql.pid').Replace('\', '/')
+
+$iniContent = @"
+[client]
+port=3307
+
+[mysqld]
+port=3307
+basedir=$mysqlBasedir
+datadir=$mysqlDatadir
+socket=mysql-cloudbrain
+default-storage-engine=INNODB
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+lower_case_table_names=1
+log-error=$mysqlLogErr
+pid-file=$mysqlPid
+secure-file-priv=$mysqlUploadsDir
+mysqlx=0
+"@
+
+New-Item -ItemType Directory -Force -Path (Split-Path $mysqlConfig) | Out-Null
+Set-Content -Path $mysqlConfig -Value $iniContent -Encoding ASCII
+Write-Host "Generated MySQL config at $mysqlConfig"
+
 if (-not (Test-Path $mysqlData)) {
   New-Item -ItemType Directory -Force -Path $mysqlData | Out-Null
-  New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot '.local-mysql\uploads') | Out-Null
+  New-Item -ItemType Directory -Force -Path $mysqlUploads | Out-Null
   & $mysqlExe --defaults-file="$mysqlConfig" --initialize-insecure --console
 }
 

@@ -5,10 +5,16 @@ set "SCRIPT_DIR=%~dp0"
 set "MVN_VERSION=3.9.16"
 set "MVN_DIR=%SCRIPT_DIR%.mvn\apache-maven-%MVN_VERSION%"
 set "MVN_ZIP=%SCRIPT_DIR%.mvn\apache-maven-%MVN_VERSION%-bin.zip"
-if not defined JAVA_HOME set "JAVA_HOME=%ProgramFiles%\Java\jdk-17"
+if not defined JAVA_HOME (
+  echo ERROR: JAVA_HOME environment variable not set.
+  echo Please set JAVA_HOME to a JDK 17+ installation directory.
+  echo Example: set JAVA_HOME=C:\Program Files\Java\jdk-17
+  exit /b 1
+)
 
 if not exist "%JAVA_HOME%\bin\java.exe" (
-  echo JDK 17 was not found at "%JAVA_HOME%".
+  echo ERROR: java.exe not found at "%JAVA_HOME%\bin".
+  echo Please verify JAVA_HOME points to a valid JDK 17+ installation.
   exit /b 1
 )
 

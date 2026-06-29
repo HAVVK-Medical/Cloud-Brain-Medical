@@ -4,6 +4,6 @@ set DB_URL=jdbc:mysql://127.0.0.1:3307/cloudbrain_medical?useSSL=false&allowPubl
 set DB_USERNAME=cloudbrain
 set DB_PASSWORD=cloudbrain_dev
 set SERVER_PORT=8088
-cd /d "d:\trae_project\Cloud-Brain-Medical"
+cd /d "%~dp0"
 echo Starting Spring Boot...
 call mvnw.cmd -pl backend spring-boot:run

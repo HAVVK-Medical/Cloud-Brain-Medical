@@ -33,5 +33,7 @@ knife4j:
 
 app:
   security:
-    jwt-secret: cloud-brain-medical-dev-secret-change-me
-    jwt-ttl-minutes: 720
+    jwt-secret: ${JWT_SECRET:cloud-brain-medical-dev-secret-change-me}
+    jwt-ttl-minutes: ${JWT_TTL_MINUTES:720}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
