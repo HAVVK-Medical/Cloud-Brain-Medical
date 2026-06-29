@@ -622,6 +622,14 @@ public class WorkflowService {
     public MedicalRecordSummary generateMedicalRecord(ActorContext actorContext,
                                                       MedicalRecordGenerateRequest request,
                                                       Consumer<String> chunkConsumer) {
+        return generateMedicalRecord(actorContext, request, chunkConsumer, null);
+    }
+
+    @Transactional
+    public MedicalRecordSummary generateMedicalRecord(ActorContext actorContext,
+                                                      MedicalRecordGenerateRequest request,
+                                                      Consumer<String> chunkConsumer,
+                                                      Consumer<String> thinkingConsumer) {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
         PatientEntity patient = patientRepository.findById(registration.getPatientId()).orElseThrow(() -> notFound("patient not found"));
@@ -642,7 +650,8 @@ public class WorkflowService {
                 request.attachments(),
                 buildMedicalRecordFallbackText(chief, request.conversationText(), patient, fallbackDiagnosis),
                 chunkConsumer != null,
-                chunkConsumer
+                chunkConsumer,
+                thinkingConsumer
         );
         MedicalRecordDraft aiDraft = parseMedicalRecordDraft(aiOutcome.result());
         String diagnosis = firstNonBlank(aiDraft.preliminaryDiagnosis(), fallbackDiagnosis);
@@ -790,6 +799,14 @@ public class WorkflowService {
     public DiagnosisSuggestionResponse suggestDiagnosis(ActorContext actorContext,
                                                        DiagnosisSuggestionRequest request,
                                                        Consumer<String> chunkConsumer) {
+        return suggestDiagnosis(actorContext, request, chunkConsumer, null);
+    }
+
+    @Transactional
+    public DiagnosisSuggestionResponse suggestDiagnosis(ActorContext actorContext,
+                                                       DiagnosisSuggestionRequest request,
+                                                       Consumer<String> chunkConsumer,
+                                                       Consumer<String> thinkingConsumer) {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
         long started = System.currentTimeMillis();
@@ -813,7 +830,8 @@ public class WorkflowService {
                         "finalDiagnosisDirection: " + fallbackDiagnosis
                 ),
                 chunkConsumer != null,
-                chunkConsumer
+                chunkConsumer,
+                thinkingConsumer
         );
         Map<String, String> parsed = AITextParser.parseKeyValueBlock(aiOutcome.result());
         String diagnosis = firstNonBlank(AITextParser.firstNonBlank(parsed, "finalDiagnosisDirection", null), fallbackDiagnosis);
@@ -1476,10 +1494,21 @@ public class WorkflowService {
                                                          String fallbackText,
                                                          boolean stream,
                                                          Consumer<String> chunkConsumer) {
+        return invokeAi(taskType, deptCode, variables, attachments, fallbackText, stream, chunkConsumer, null);
+    }
+
+    private AIModels.AIExecutionOutcome<String> invokeAi(String taskType,
+                                                         String deptCode,
+                                                         Map<String, String> variables,
+                                                         List<AiContentAttachment> attachments,
+                                                         String fallbackText,
+                                                         boolean stream,
+                                                         Consumer<String> chunkConsumer,
+                                                         Consumer<String> thinkingConsumer) {
         List<AIModels.AIContentPart> parts = attachments == null
                 ? List.of()
                 : attachments.stream().map(this::toContentPart).toList();
-        return aiInvocationService.chat(taskType, deptCode, variables, parts, fallbackText, stream, chunkConsumer);
+        return aiInvocationService.chat(taskType, deptCode, variables, parts, fallbackText, stream, chunkConsumer, thinkingConsumer);
     }
 
     private AIModels.AIContentPart toContentPart(AiContentAttachment attachment) {
