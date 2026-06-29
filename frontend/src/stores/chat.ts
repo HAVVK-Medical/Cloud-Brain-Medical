@@ -10,6 +10,7 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false);
   const streamAbortController = ref<AbortController | null>(null);
   const streamBuffer = ref('');
+  const thinkingBuffer = ref('');
 
   const currentSession = computed(() =>
     sessions.value.find(s => s.id === currentSessionId.value) ?? null
@@ -68,11 +69,18 @@ export const useChatStore = defineStore('chat', () => {
     };
     messages.value.push(assistantMsg);
     streamBuffer.value = '';
+    thinkingBuffer.value = '';
 
     isStreaming.value = true;
 
     const url = buildStreamUrl(currentSessionId.value!, text);
     const eventSource = new EventSource(url);
+
+    eventSource.addEventListener('thinking', (event) => {
+      const data = JSON.parse(event.data);
+      thinkingBuffer.value += data.content;
+      assistantMsg.thinkingContent = thinkingBuffer.value;
+    });
 
     eventSource.addEventListener('chunk', (event) => {
       const data = JSON.parse(event.data);
@@ -83,6 +91,8 @@ export const useChatStore = defineStore('chat', () => {
     eventSource.addEventListener('done', (event) => {
       const data = JSON.parse(event.data);
       assistantMsg.id = data.messageId;
+      assistantMsg.content = streamBuffer.value;
+      assistantMsg.thinkingContent = data.thinkingContent || thinkingBuffer.value;
       assistantMsg.aiMeta = JSON.stringify(data.meta as ChatMeta);
       isStreaming.value = false;
       eventSource.close();
@@ -121,6 +131,7 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     isStreaming,
     streamBuffer,
+    thinkingBuffer,
     currentSession,
     fetchSessions,
     selectSession,

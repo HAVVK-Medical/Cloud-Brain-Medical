@@ -531,6 +531,12 @@ function beginButtonLabel() {
       </div>
     </div>
 
+    <!-- Thinking content indicator during streaming -->
+    <div v-if="aiStreamStore.thinkingText && aiStreamStore.streaming" class="fixed right-12 top-1/2 -translate-y-1/2 z-30 bg-white border border-brand/30 rounded-lg shadow-lg p-3 max-w-xs text-xs text-text-secondary max-h-48 overflow-y-auto">
+      <p class="font-medium text-brand mb-1">💭 AI 思考中...</p>
+      <p class="whitespace-pre-wrap">{{ aiStreamStore.thinkingText }}</p>
+    </div>
+
     <!-- AI Workflow Sidebar toggle -->
     <button
       class="fixed right-0 top-1/2 -translate-y-1/2 z-30 w-9 h-20 bg-brand text-white rounded-l-lg flex items-center justify-center shadow-lg hover:bg-brand-dark transition cursor-pointer"

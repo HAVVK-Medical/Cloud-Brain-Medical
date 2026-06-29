@@ -14,7 +14,7 @@ interface ParsedResult {
   suggestedQuestions: string[];
 }
 
-type ConversationMessage = { role: 'USER' | 'ASSISTANT' | 'SYSTEM'; content: string };
+type ConversationMessage = { role: 'USER' | 'ASSISTANT' | 'SYSTEM'; content: string; thinkingContent?: string };
 
 const { workspace } = defineProps<{ workspace: any }>();
 const router = useRouter();
@@ -26,6 +26,7 @@ const streaming = ref(false);
 const confirming = ref(false);
 const sessionId = ref<number | null>(null);
 const finalResult = ref<ParsedResult | null>(null);
+const thinkingExpanded = ref(false);
 const error = ref('');
 const eventSource = ref<EventSource | null>(null);
 
@@ -259,6 +260,10 @@ async function startConversation() {
   }
   eventSource.value = es;
 
+  es.addEventListener('thinking', (event) => {
+    assistantMsg.thinkingContent = (assistantMsg.thinkingContent || '') + parseChunkData(event.data);
+  });
+
   es.addEventListener('chunk', (event) => {
     rawAssistantContent += parseChunkData(event.data);
     applyAssistantContent(assistantMsg, rawAssistantContent);
@@ -402,6 +407,16 @@ watch(expanded, (val) => {
               <Bot :size="12" class="text-brand" />
             </div>
             <div class="max-w-[85%] bg-gray-100 rounded-2xl rounded-bl-md px-3 py-2 text-sm whitespace-pre-wrap">
+              <div v-if="msg.thinkingContent" class="mb-2">
+                <button class="flex items-center gap-1 text-xs text-text-secondary hover:text-brand cursor-pointer" @click="thinkingExpanded = !thinkingExpanded">
+                  <span>💭 AI 思考过程</span>
+                  <ChevronDown v-if="!thinkingExpanded" :size="12" />
+                  <ChevronUp v-else :size="12" />
+                </button>
+                <div v-if="thinkingExpanded" class="mt-1 p-2 bg-black/5 rounded text-xs text-text-secondary italic max-h-32 overflow-y-auto whitespace-pre-wrap">
+                  {{ msg.thinkingContent }}
+                </div>
+              </div>
               <span v-html="renderConversationText(msg.content)" />
               <span v-if="streaming && i === messages.length - 1" class="inline-block w-1.5 h-4 bg-brand animate-pulse ml-0.5 align-middle" />
             </div>

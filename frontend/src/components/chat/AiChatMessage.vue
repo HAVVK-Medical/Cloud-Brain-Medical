@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import { ChevronDown, ChevronUp } from 'lucide-vue-next';
 import type { ChatMessage, ChatMeta } from '@/types/chat';
 
 const props = defineProps<{
@@ -20,8 +21,14 @@ const showCursor = computed(() => {
   return props.isStreaming && props.message.role === 'ASSISTANT' && !props.message.content;
 });
 
+const thinkingExpanded = ref(false);
+
 const renderedContent = computed(() => {
   return simpleMarkdown(props.message.content);
+});
+
+const renderedThinking = computed(() => {
+  return simpleMarkdown(props.message.thinkingContent || '');
 });
 
 function simpleMarkdown(text: string): string {
@@ -46,6 +53,14 @@ function simpleMarkdown(text: string): string {
       <span v-else>🧠</span>
     </div>
     <div class="chat-msg__body">
+      <div v-if="message.role === 'ASSISTANT' && message.thinkingContent" class="chat-msg__thinking">
+        <button class="chat-msg__thinking-toggle" @click="thinkingExpanded = !thinkingExpanded">
+          <span>💭 AI 思考过程</span>
+          <ChevronDown v-if="!thinkingExpanded" :size="14" />
+          <ChevronUp v-else :size="14" />
+        </button>
+        <div v-if="thinkingExpanded" class="chat-msg__thinking-content" v-html="renderedThinking" />
+      </div>
       <div class="chat-msg__content" v-html="renderedContent" />
       <span v-if="showCursor" class="chat-msg__cursor">▌</span>
       <div v-if="meta" class="chat-msg__meta">
@@ -83,4 +98,20 @@ function simpleMarkdown(text: string): string {
 .chat-msg__meta { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .meta-tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); color: var(--muted); }
 .meta-time { font-size: 11px; color: var(--muted); }
+.chat-msg__thinking { margin-bottom: 10px; }
+.chat-msg__thinking-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); cursor: pointer;
+  background: none; border: none; padding: 2px 0;
+  width: 100%; text-align: left;
+}
+.chat-msg__thinking-toggle:hover { color: var(--primary); }
+.chat-msg__thinking-content {
+  margin-top: 6px; padding: 8px 10px;
+  background: rgba(0,0,0,.03); border-radius: 6px;
+  font-size: 12px; color: var(--muted); font-style: italic;
+  border-left: 2px solid var(--border);
+  max-height: 200px; overflow-y: auto;
+  white-space: pre-wrap;
+}
 </style>

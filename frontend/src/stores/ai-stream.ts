@@ -19,6 +19,7 @@ type AiStreamResultHandler = (data: AiStreamResult, delivery: Exclude<AiStreamDe
 export const useAiStreamStore = defineStore('ai-stream', () => {
   const sessionId = ref<string | null>(null);
   const streamText = ref('');
+  const thinkingText = ref('');
   const streaming = ref(false);
   const connected = computed(() => sessionId.value !== null && streaming.value);
   let currentSource: EventSource | null = null;
@@ -127,6 +128,13 @@ export const useAiStreamStore = defineStore('ai-stream', () => {
       currentSource = source;
       resolveCurrentStream = finish;
 
+      source.addEventListener('thinking', (event) => {
+        if (activeRunId !== runId || cancelRequested) {
+          return;
+        }
+        const payload = parseSsePayload<{ text?: string }>(event.data);
+        thinkingText.value += payload?.text ?? event.data;
+      });
       source.addEventListener('chunk', (event) => {
         if (activeRunId !== runId || cancelRequested) {
           return;
@@ -179,6 +187,7 @@ export const useAiStreamStore = defineStore('ai-stream', () => {
     }
 
     streamText.value = '';
+    thinkingText.value = '';
     streaming.value = true;
     cancelRequested = false;
     const runId = ++activeRunId;
@@ -243,5 +252,5 @@ export const useAiStreamStore = defineStore('ai-stream', () => {
     streamText.value = '';
   }
 
-  return { sessionId, streamText, streaming, connected, start, cancel };
+  return { sessionId, streamText, thinkingText, streaming, connected, start, cancel };
 });
