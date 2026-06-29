@@ -44,7 +44,7 @@ const { workspace } = defineProps<{ workspace: any }>();
               <td class="py-2.5"><StatusChip :tone="item.status === 'ACTIVE' ? 'success' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</StatusChip></td>
               <td class="py-2.5"><div class="flex gap-1">
                 <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.selectRule(item)">编辑</button>
-                <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'rule'; workspace.currentId = item.id; workspace.toggleCurrent()" :disabled="workspace.saving">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
+                <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'rule'; workspace.currentId = item.id; workspace.requestToggleCurrent()" :disabled="workspace.saving">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
               </div></td>
             </tr>
           </tbody>
@@ -57,7 +57,7 @@ const { workspace } = defineProps<{ workspace: any }>();
         :page-size="workspace.paginatedRules.pageSize"
         @update:page="workspace.paginatedRules.setPage"
       />
-      <EmptyState v-if="!workspace.rules.length" icon="search" title="暂无规则" />
+      <EmptyState v-if="!workspace.rules.length && !workspace.loading" icon="search" title="暂无规则" />
     </SectionCard>
 
     <SectionCard v-if="activeConfigTab === 'ai'" title="AI配置">
@@ -74,7 +74,7 @@ const { workspace } = defineProps<{ workspace: any }>();
               <td class="py-2.5"><StatusChip :tone="item.status === 'ACTIVE' ? 'success' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</StatusChip></td>
               <td class="py-2.5"><div class="flex gap-1">
                 <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.selectAi(item)">编辑</button>
-                <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'ai'; workspace.currentId = item.id; workspace.toggleCurrent()" :disabled="workspace.saving">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
+                <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'ai'; workspace.currentId = item.id; workspace.requestToggleCurrent()" :disabled="workspace.saving">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
               </div></td>
             </tr>
           </tbody>
@@ -87,6 +87,7 @@ const { workspace } = defineProps<{ workspace: any }>();
         :page-size="workspace.paginatedAiConfigs.pageSize"
         @update:page="workspace.paginatedAiConfigs.setPage"
       />
+      <EmptyState v-if="!workspace.aiConfigs.length && !workspace.loading" icon="search" title="暂无AI配置" />
     </SectionCard>
 
     <SectionCard v-if="activeConfigTab === 'prompt'" title="Prompt模板">
@@ -104,7 +105,7 @@ const { workspace } = defineProps<{ workspace: any }>();
               <td class="py-2.5"><StatusChip :tone="item.status === 'ACTIVE' ? 'success' : 'neutral'">{{ item.status === 'ACTIVE' ? '启用' : '停用' }}</StatusChip></td>
               <td class="py-2.5"><div class="flex gap-1">
                 <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.selectPrompt(item)">编辑</button>
-                <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'prompt'; workspace.currentId = item.id; workspace.toggleCurrent()" :disabled="workspace.saving">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
+                <button class="btn-ghost !p-1 !text-xs" type="button" @click="workspace.currentKind = 'prompt'; workspace.currentId = item.id; workspace.requestToggleCurrent()" :disabled="workspace.saving">{{ item.status === 'ACTIVE' ? '停用' : '启用' }}</button>
               </div></td>
             </tr>
           </tbody>
@@ -117,6 +118,7 @@ const { workspace } = defineProps<{ workspace: any }>();
         :page-size="workspace.paginatedPromptTemplates.pageSize"
         @update:page="workspace.paginatedPromptTemplates.setPage"
       />
+      <EmptyState v-if="!workspace.promptTemplates.length && !workspace.loading" icon="search" title="暂无Prompt模板" />
     </SectionCard>
   </div>
 </template>

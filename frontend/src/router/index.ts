@@ -58,6 +58,11 @@ const router = createRouter({
         { path: 'audit', name: 'admin-audit', component: () => import('@/views/admin/panels/AdminAuditPanel.vue') },
       ],
     },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('@/views/NotFoundView.vue'),
+    },
   ],
 });
 

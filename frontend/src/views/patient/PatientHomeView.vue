@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { CalendarDays, FileText, ScanSearch, Ticket, UserRound } from 'lucide-vue-next';
+import { CalendarDays, Clock, FileText, ScanSearch, Ticket, UserRound } from 'lucide-vue-next';
 import AiChatLauncher from '@/components/chat/AiChatLauncher.vue';
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue';
 
@@ -48,6 +48,7 @@ const tabs = [
   { id: 'triage', label: '分诊', icon: ScanSearch, path: '/patient/triage' },
   { id: 'registration', label: '挂号', icon: Ticket, path: '/patient/registration' },
   { id: 'records', label: '病历', icon: FileText, path: '/patient/records' },
+  { id: 'history', label: '记录', icon: Clock, path: '/patient/history' },
   { id: 'profile', label: '我的', icon: UserRound, path: '/patient/profile' },
 ] as const;
 
@@ -107,7 +108,8 @@ const visibleSchedules = computed(() =>
 const selectedSchedule = computed(() => visibleSchedules.value.find((item) => item.id === selectedScheduleId.value) ?? null);
 const waitingRegistrations = computed(() => registrations.value.filter((item) => item.status === 'WAITING'));
 const completedRegistrations = computed(() => registrations.value.filter((item) => item.status === 'COMPLETED'));
-const latestRegistration = computed(() => registrations.value[0] ?? null);
+const latestRegistration = computed(() => registrations.value.find((item) => item.status !== 'CANCELLED') ?? null);
+const activeRegistrations = computed(() => registrations.value.filter((item) => item.status === 'WAITING'));
 const latestTriage = computed(() => triageHistory.value[0] ?? triageResult.value);
 const cancelTargetRegistration = computed(() =>
   registrations.value.find((item) => item.id === cancelRegistrationId.value) ?? null,
@@ -500,6 +502,7 @@ const workspace = reactive({
   waitingRegistrations,
   completedRegistrations,
   latestRegistration,
+  activeRegistrations,
   latestTriage,
   cancelTargetRegistration,
   activeTone,

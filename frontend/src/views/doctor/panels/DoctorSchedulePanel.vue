@@ -2,12 +2,14 @@
 import SectionCard from '@/components/shared/SectionCard.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
+import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
 </script>
 
 <template>
-  <SectionCard title="我的排班">
+  <LoadingSkeleton v-if="workspace.loading" :rows="3" />
+  <SectionCard v-else title="我的排班">
     <div v-if="workspace.schedules.length" class="space-y-2">
       <div v-for="slot in workspace.schedules" :key="slot.id" class="flex items-center justify-between py-3 px-3 rounded-lg border border-border">
         <div>

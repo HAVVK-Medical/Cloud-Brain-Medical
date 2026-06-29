@@ -31,11 +31,28 @@ export const useNotificationStore = defineStore('notification', () => {
     notifications.value = notifications.value.filter((n) => n.id !== id);
   }
 
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const MAX_RECONNECT_DELAY = 30_000;
+
+  function scheduleReconnect(token: string) {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), MAX_RECONNECT_DELAY);
+    reconnectAttempt++;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect(token);
+    }, delay);
+  }
+
   function connect(token: string) {
-    if (socket) return;
+    if (socket && socket.readyState === WebSocket.OPEN) return;
     socketState.value = 'connecting';
     socket = new WebSocket(buildWsUrl('/ws/notifications', token));
-    socket.onopen = () => { socketState.value = 'connected'; };
+    socket.onopen = () => {
+      socketState.value = 'connected';
+      reconnectAttempt = 0;
+    };
     socket.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as { type?: string; payload?: NotificationRecordSummary };
@@ -47,8 +64,25 @@ export const useNotificationStore = defineStore('notification', () => {
         }
       } catch { /* ignore malformed */ }
     };
-    socket.onclose = () => { socket = null; socketState.value = 'closed'; };
-    socket.onerror = () => { socketState.value = 'closed'; };
+    socket.onclose = () => {
+      socket = null;
+      socketState.value = 'closed';
+      scheduleReconnect(token);
+    };
+    socket.onerror = () => {
+      socket?.close();
+    };
+  }
+
+  function disconnect() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectAttempt = 0;
+    socket?.close();
+    socket = null;
+    socketState.value = 'idle';
   }
 
   function disconnect() {

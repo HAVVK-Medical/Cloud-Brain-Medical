@@ -35,9 +35,37 @@ const { workspace } = defineProps<{ workspace: any }>();
               <p class="mt-0.5 font-medium text-text-main">{{ workspace.latestCreatedRegistration.period || '未安排' }}</p>
             </div>
           </div>
+          <RouterLink to="/patient/history" class="inline-flex items-center gap-1 mt-2 text-xs text-brand hover:underline">查看全部记录 →</RouterLink>
         </div>
       </div>
     </section>
+
+    <!-- My existing registrations -->
+    <SectionCard v-if="workspace.registrations?.length" title="我的挂号">
+      <div class="space-y-2">
+        <div v-for="reg in workspace.registrations" :key="reg.id" class="py-2 border-b border-border last:border-b-0 text-sm flex justify-between gap-3">
+          <div class="min-w-0">
+            <span class="font-medium">{{ workspace.formatDate(reg.workDate) }}</span>
+            <span class="text-text-secondary"> · {{ reg.doctorName }}</span>
+            <p class="text-xs text-text-secondary mt-0.5">{{ reg.departmentName }} · {{ reg.period || '未排时段' }}</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <StatusChip :tone="reg.status === 'CANCELLED' ? 'danger' : reg.status === 'COMPLETED' ? 'success' : 'info'">
+              {{ reg.status === 'WAITING' ? '待就诊' : reg.status === 'COMPLETED' ? '已完成' : reg.status === 'CANCELLED' ? '已取消' : reg.status }}
+            </StatusChip>
+            <button
+              v-if="reg.status === 'WAITING'"
+              type="button"
+              class="btn-ghost !px-2 !py-1 !text-xs !text-danger"
+              :disabled="workspace.canceling"
+              @click="workspace.requestCancelWaitingRegistration(reg.id)"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </SectionCard>
 
     <div class="flex items-center gap-1 text-xs font-medium justify-center">
       <span class="flex items-center gap-1" :class="workspace.selectedDepartmentId ? 'text-success' : 'text-brand'">

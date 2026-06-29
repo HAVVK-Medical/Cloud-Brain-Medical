@@ -10,39 +10,29 @@ const { workspace } = defineProps<{ workspace: any }>();
   <div class="p-4 space-y-4">
     <p class="text-sm font-semibold text-text-main">你好，{{ workspace.displayName }}</p>
 
-    <SectionCard v-if="workspace.latestRegistration" title="当前挂号">
-      <div class="space-y-2 text-sm">
-        <div class="flex justify-between">
-          <span class="text-text-secondary">科室</span>
-          <span class="font-medium">{{ workspace.latestRegistration.departmentName }}</span>
+    <SectionCard v-if="workspace.activeRegistrations?.length" title="我的挂号">
+      <div class="space-y-3">
+        <div v-for="reg in workspace.activeRegistrations" :key="reg.id" class="py-2 border-b border-border last:border-b-0">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium">{{ workspace.formatDate(reg.workDate) }} · {{ reg.period || '未安排' }}</p>
+              <p class="text-xs text-text-secondary mt-0.5">{{ reg.departmentName }} · {{ reg.doctorName }}</p>
+            </div>
+            <StatusChip :tone="'info'">待就诊</StatusChip>
+          </div>
+          <button
+            type="button"
+            class="btn-ghost !px-2 !py-1 !text-xs !text-danger mt-1"
+            :disabled="workspace.canceling"
+            @click="workspace.requestCancelWaitingRegistration(reg.id)"
+          >
+            {{ workspace.canceling ? '取消中...' : '取消挂号' }}
+          </button>
         </div>
-        <div class="flex justify-between">
-          <span class="text-text-secondary">医生</span>
-          <span class="font-medium">{{ workspace.latestRegistration.doctorName }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-text-secondary">日期</span>
-          <span class="font-medium">{{ workspace.formatDate(workspace.latestRegistration.workDate) }}</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-text-secondary">状态</span>
-          <StatusChip :tone="workspace.latestRegistration.status === 'WAITING' ? 'info' : workspace.latestRegistration.status === 'COMPLETED' ? 'success' : 'neutral'">
-            {{ workspace.latestRegistration.status === 'WAITING' ? '待就诊' : workspace.latestRegistration.status === 'COMPLETED' ? '已完成' : workspace.latestRegistration.status }}
-          </StatusChip>
-        </div>
-        <button
-          v-if="workspace.latestRegistration.status === 'WAITING'"
-          type="button"
-          class="btn-secondary w-full !py-2 !text-sm"
-          :disabled="workspace.canceling"
-          @click="workspace.requestCancelWaitingRegistration(workspace.latestRegistration.id)"
-        >
-          {{ workspace.canceling ? '取消中...' : '取消挂号' }}
-        </button>
       </div>
     </SectionCard>
 
-    <EmptyState v-else icon="calendar" title="暂无挂号记录" description="完成分诊后可在这里查看和操作挂号" action-label="去分诊" @action="$router.push('/patient/triage')" />
+    <EmptyState v-if="!workspace.activeRegistrations?.length" icon="calendar" title="暂无挂号记录" description="完成分诊后可在这里查看和操作挂号" action-label="去分诊" @action="$router.push('/patient/triage')" />
 
     <SectionCard v-if="workspace.latestTriage" title="最近分诊结果">
       <div class="space-y-2 text-sm">

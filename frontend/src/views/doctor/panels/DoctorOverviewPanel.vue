@@ -2,6 +2,7 @@
 import SectionCard from '@/components/shared/SectionCard.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
+import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
 import DashboardCharts from '@/components/DashboardCharts.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
@@ -9,7 +10,8 @@ const { workspace } = defineProps<{ workspace: any }>();
 
 <template>
   <div class="space-y-6">
-    <div class="grid grid-cols-4 gap-4">
+    <LoadingSkeleton v-if="workspace.loading" :rows="2" />
+    <div v-else class="grid grid-cols-4 gap-4">
       <div class="card text-center">
         <div class="text-2xl font-bold text-brand">{{ workspace.dashboard?.todayVisits ?? 0 }}</div>
         <div class="text-xs text-text-secondary mt-1">今日接诊</div>

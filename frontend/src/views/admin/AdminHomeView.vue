@@ -56,6 +56,8 @@ import {
   markNotificationRead,
 } from '@/api/workflow';
 import { useAuthStore } from '@/stores/auth';
+import { useToast } from '@/composables/useToast';
+import ConfirmDialog from '@/components/shared/ConfirmDialog.vue';
 import type {
   AiCallRecordSummary,
   AiConfigSummary,
@@ -90,10 +92,16 @@ type AiRecordTaskType = 'ALL' | 'TRIAGE' | 'MEDICAL_RECORD' | 'DIAGNOSIS' | 'PRE
 
 const authStore = useAuthStore();
 const route = useRoute();
+const toast = useToast();
 
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
+const confirmOpen = ref(false);
+const confirmTitle = ref('');
+const confirmMessage = ref('');
+const confirmAction = ref<(() => void) | null>(null);
+const confirmLoading = ref(false);
 const dashboard = ref<DashboardOverview | null>(null);
 const dashboardTrends = ref<DashboardTrendPoint[]>([]);
 const aiUsage = ref<AiUsageStats | null>(null);
@@ -361,6 +369,7 @@ const adminWorkspace = reactive({
   syncCurrentSelection,
   saveCurrent,
   toggleCurrent,
+  requestToggleCurrent,
   createNew,
   clearFilters,
   selectDepartment,
@@ -909,6 +918,7 @@ async function saveCurrent() {
       return;
     }
     currentId.value = savedId;
+    toast.success(currentId.value ? '保存成功' : '创建成功');
     await loadAll();
     syncCurrentSelection();
   } catch (cause) {
@@ -918,10 +928,17 @@ async function saveCurrent() {
   }
 }
 
+function requestToggleCurrent() {
+  if (!currentId.value) return;
+  confirmTitle.value = '确认切换状态';
+  confirmMessage.value = '确认要切换该资源的状态吗？';
+  confirmAction.value = () => toggleCurrent();
+  confirmOpen.value = true;
+}
+
 async function toggleCurrent() {
-  if (!currentId.value) {
-    return;
-  }
+  if (!currentId.value) return;
+  confirmOpen.value = false;
   saving.value = true;
   error.value = '';
   try {
@@ -940,6 +957,7 @@ async function toggleCurrent() {
     } else {
       await adminTogglePromptTemplate(currentId.value);
     }
+    toast.success('状态已更新');
     await loadAll();
   } catch (cause) {
     error.value = resolveUiErrorMessage(cause, '切换状态失败');
@@ -1067,4 +1085,14 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  <ConfirmDialog
+    :open="confirmOpen"
+    :title="confirmTitle"
+    :message="confirmMessage"
+    level="warning"
+    confirm-label="确认"
+    :loading="saving"
+    @confirm="confirmAction?.()"
+    @cancel="confirmOpen = false"
+  />
 </template>

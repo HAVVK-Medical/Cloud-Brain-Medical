@@ -14,6 +14,8 @@ const role = ref<WorkspaceRole>('patient');
 const mode = ref<'login' | 'register'>('login');
 const submitted = ref(false);
 const expiredNotice = ref('');
+const successMessage = ref('');
+const validationErrors = ref<string[]>([]);
 
 const redirectTarget = computed(() => {
   const redirect = route.query.redirect;
@@ -59,8 +61,24 @@ watch(
   { immediate: true },
 );
 
+function validate(): boolean {
+  validationErrors.value = [];
+  if (!form.username.trim()) validationErrors.value.push('请输入用户名');
+  if (!form.password) validationErrors.value.push('请输入密码');
+  else if (form.password.length < 6) validationErrors.value.push('密码至少需要6位');
+  if (mode.value === 'register' && role.value === 'patient') {
+    if (!form.realName.trim()) validationErrors.value.push('请输入真实姓名');
+    if (!form.phone.trim()) validationErrors.value.push('请输入手机号');
+    else if (!/^1\d{10}$/.test(form.phone.trim())) validationErrors.value.push('手机号格式不正确');
+    if (form.age && (isNaN(Number(form.age)) || Number(form.age) < 0 || Number(form.age) > 150)) validationErrors.value.push('年龄不合法');
+  }
+  return validationErrors.value.length === 0;
+}
+
 async function submit() {
+  if (!validate()) return;
   submitted.value = true;
+  successMessage.value = '';
   try {
     if (role.value === 'patient' && mode.value === 'register') {
       await authStore.register({
@@ -71,6 +89,7 @@ async function submit() {
         gender: form.gender.trim(),
         age: form.age ? Number(form.age) : null,
       });
+      successMessage.value = '注册成功，请登录';
       mode.value = 'login';
       return;
     }
@@ -146,15 +165,23 @@ async function submit() {
         </label>
         <div class="grid grid-cols-2 gap-3">
           <label class="label-text">性别
-            <input v-model="form.gender" class="input-field phone-input mt-1" placeholder="男/女" />
+            <select v-model="form.gender" class="input-field phone-input mt-1">
+              <option value="" disabled>请选择</option>
+              <option value="男">男</option>
+              <option value="女">女</option>
+            </select>
           </label>
           <label class="label-text">年龄
-            <input v-model="form.age" class="input-field phone-input mt-1" type="number" min="0" placeholder="0" />
+            <input v-model="form.age" class="input-field phone-input mt-1" type="number" min="0" max="150" placeholder="0" />
           </label>
         </div>
       </template>
 
       <p v-if="expiredNotice" class="text-warning text-xs p-2 bg-yellow-50 rounded-md">{{ expiredNotice }}</p>
+      <p v-if="successMessage" class="text-success text-xs p-2 bg-green-50 rounded-md">{{ successMessage }}</p>
+      <div v-if="validationErrors.length" class="text-danger text-xs p-2 bg-red-50 rounded-md space-y-0.5">
+        <p v-for="(err, i) in validationErrors" :key="i">{{ err }}</p>
+      </div>
       <p v-if="authStore.error" class="text-danger text-xs p-2 bg-red-50 rounded-md">{{ authStore.error }}</p>
 
       <button class="btn-primary w-full" type="submit" @click="submit" :disabled="authStore.loading || submitted">

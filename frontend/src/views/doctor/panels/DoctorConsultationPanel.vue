@@ -474,9 +474,11 @@ function beginButtonLabel() {
                   type="button"
                   @click="runPrescriptionReviewWorkflow()"
                   :disabled="workspace.reviewingPrescription || !workspace.canReviewSelectedPrescription"
+                  :title="!workspace.canReviewSelectedPrescription && !workspace.reviewingPrescription ? '请先保存病历后再提交审方' : ''"
                 >
                   {{ workspace.reviewingPrescription ? '审方中...' : '提交审方' }}
                 </button>
+                <p v-if="!workspace.canReviewSelectedPrescription && !workspace.reviewingPrescription" class="text-xs text-text-secondary mt-1">请先保存病历后再提交审方</p>
               </div>
             </div>
           </SectionCard>

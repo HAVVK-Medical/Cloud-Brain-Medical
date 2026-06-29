@@ -2,6 +2,7 @@
 import SectionCard from '@/components/shared/SectionCard.vue';
 import StatusChip from '@/components/shared/StatusChip.vue';
 import EmptyState from '@/components/shared/EmptyState.vue';
+import LoadingSkeleton from '@/components/shared/LoadingSkeleton.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
 </script>
@@ -13,7 +14,8 @@ const { workspace } = defineProps<{ workspace: any }>();
       <button class="btn-primary" type="button" @click="workspace.loadHistory()">搜索</button>
     </div>
 
-    <SectionCard title="病历历史">
+    <LoadingSkeleton v-if="workspace.loading" :rows="3" class="mb-4" />
+    <SectionCard v-else title="病历历史">
       <div v-if="workspace.medicalRecords.length" class="space-y-3">
         <div v-for="record in workspace.medicalRecords" :key="record.id" class="py-3 border-b border-border last:border-b-0 text-sm">
           <div class="flex items-start justify-between gap-3">
