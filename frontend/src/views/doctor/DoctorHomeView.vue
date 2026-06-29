@@ -152,6 +152,9 @@ const selectedRegistration = computed<RegistrationSummary | null>(() => {
 });
 const selectedRegistrationStatus = computed(() => selectedRegistration.value?.status ?? null);
 const canBeginSelectedConsultation = computed(() => selectedRegistrationStatus.value === 'WAITING');
+const canReviewSelectedPrescription = computed(() =>
+  ['MEDICAL_RECORD_SAVED', 'PRESCRIPTION_REVIEWED'].includes(selectedRegistrationStatus.value ?? ''),
+);
 const consultationStatusLabel = computed(() => registrationStatusLabel(selectedRegistrationStatus.value));
 const consultationStatusTone = computed<StatusTone>(() => registrationStatusTone(selectedRegistrationStatus.value));
 
@@ -229,6 +232,7 @@ const doctorWorkspace = reactive({
   selectedRegistration,
   selectedRegistrationStatus,
   canBeginSelectedConsultation,
+  canReviewSelectedPrescription,
   consultationStatusLabel,
   consultationStatusTone,
   overviewTone,
@@ -869,6 +873,11 @@ async function saveCurrentMedicalRecord() {
 }
 
 async function reviewCurrentPrescription() {
+  if (selectedRegistrationId.value && !canReviewSelectedPrescription.value) {
+    error.value = '请先保存正式病历，再进行处方审核';
+    return false;
+  }
+
   if (!selectedRegistrationId.value) {
     error.value = '请先选择一个接诊号源';
     return false;
@@ -884,10 +893,25 @@ async function reviewCurrentPrescription() {
   error.value = '';
   reviewResult.value = null;
   try {
-    reviewResult.value = await reviewPrescription({
+    const result = await reviewPrescription({
       registrationId: selectedRegistrationId.value,
       items,
     });
+    reviewResult.value = result;
+    if (workspace.value?.registration.id === selectedRegistrationId.value) {
+      workspace.value = {
+        ...workspace.value,
+        registration: {
+          ...workspace.value.registration,
+          status: 'PRESCRIPTION_REVIEWED',
+          riskLevel: result.riskLevel,
+        },
+        recentReviews: [result, ...workspace.value.recentReviews.filter((item) => item.reviewId !== result.reviewId)],
+      };
+    }
+    queue.value = queue.value.map((item) => item.id === selectedRegistrationId.value
+      ? { ...item, status: 'PRESCRIPTION_REVIEWED', riskLevel: result.riskLevel }
+      : item);
     await loadNotifications();
     return true;
   } catch (cause) {

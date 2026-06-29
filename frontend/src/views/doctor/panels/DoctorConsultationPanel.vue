@@ -142,7 +142,15 @@ watch(() => workspace.reviewingPrescription, (val) => {
 });
 
 interface DiagnosisEntry { name: string; confidence: number }
-interface RuleHitEntry { ruleName?: string; alertMessage?: string; suggestion?: string; riskLevel?: string }
+interface RuleHitEntry {
+  ruleName?: string;
+  ruleCode?: string;
+  ruleType?: string;
+  alertMessage?: string;
+  suggestion?: string;
+  riskLevel?: string;
+  basisSnapshot?: string;
+}
 interface DrugEntry {
   id: number;
   name: string;
@@ -199,10 +207,35 @@ function drugPrice(drug: DrugEntry | undefined) {
   return `¥${Number(drug.unitPrice).toFixed(2)}`;
 }
 
-function parseRuleHits(raw: string | Record<string, unknown>[]): RuleHitEntry[] {
+function parseRuleHits(raw: unknown): RuleHitEntry[] {
+  if (!raw) return [];
   if (Array.isArray(raw)) return raw as RuleHitEntry[];
+  if (typeof raw === 'object') {
+    const review = raw as { ruleHits?: RuleHitEntry[]; localRuleHits?: string | null };
+    if (Array.isArray(review.ruleHits) && review.ruleHits.length) {
+      return review.ruleHits;
+    }
+    return parseRuleHits(review.localRuleHits);
+  }
   if (typeof raw === 'string') {
-    try { return JSON.parse(raw) as RuleHitEntry[]; } catch { return []; }
+    const text = raw.trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed as RuleHitEntry[];
+    } catch {
+      // Fall through to legacy plain-text parsing.
+    }
+    return text.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const match = line.match(/^\[(.+?)\]\s*(.+)$/);
+        return {
+          riskLevel: match?.[1] || undefined,
+          alertMessage: match?.[2] || line,
+        };
+      });
   }
   return [];
 }
@@ -435,7 +468,12 @@ function beginButtonLabel() {
 
               <div class="flex gap-2">
                 <button class="btn-secondary" type="button" @click="workspace.addPrescriptionItem()">+ 添加药品</button>
-                <button class="btn-primary" type="button" @click="runPrescriptionReviewWorkflow()" :disabled="workspace.reviewingPrescription">
+                <button
+                  class="btn-primary"
+                  type="button"
+                  @click="runPrescriptionReviewWorkflow()"
+                  :disabled="workspace.reviewingPrescription || !workspace.canReviewSelectedPrescription"
+                >
                   {{ workspace.reviewingPrescription ? '审方中...' : '提交审方' }}
                 </button>
               </div>
@@ -498,19 +536,32 @@ function beginButtonLabel() {
               风险等级：{{ workspace.reviewResult.riskLevel === 'HIGH' ? '高风险' : workspace.reviewResult.riskLevel === 'MEDIUM' ? '中风险' : '低风险' }}
             </div>
 
+            <div v-if="workspace.reviewResult.degraded" class="ai-degraded-notice mb-3">
+              大模型解释暂不可用，已展示本地规则结果。
+            </div>
+
+            <div
+              v-if="workspace.reviewResult.contextMissingItemList?.length"
+              class="mb-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-warning"
+            >
+              <p class="font-medium">审核上下文不完整</p>
+              <p class="mt-1">{{ workspace.reviewResult.contextMissingItemList.join('、') }}</p>
+            </div>
+
             <!-- Local Rule Engine -->
-            <div v-if="workspace.reviewResult.localRuleHits" class="mb-3 p-3 rounded-lg bg-gray-50 border border-border">
+            <div v-if="parseRuleHits(workspace.reviewResult).length" class="mb-3 p-3 rounded-lg bg-gray-50 border border-border">
               <h4 class="text-sm font-medium mb-2">📋 本地规则引擎</h4>
-              <div v-for="(hit, idx) in parseRuleHits(workspace.reviewResult.localRuleHits)" :key="idx"
+              <div v-for="(hit, idx) in parseRuleHits(workspace.reviewResult)" :key="idx"
                    class="flex gap-3 p-2 rounded-md bg-white mb-2 last:mb-0">
                 <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded font-semibold"
                       :class="ruleRiskClass(hit.riskLevel)">
                   {{ riskLabel(hit.riskLevel) }}
                 </span>
                 <div class="text-xs">
-                  <strong>{{ hit.ruleName || hit.alertMessage }}</strong>
+                  <strong>{{ hit.ruleName || hit.ruleCode || hit.ruleType || hit.alertMessage }}</strong>
                   <p v-if="hit.alertMessage" class="text-text-secondary mt-0.5">{{ hit.alertMessage }}</p>
                   <p v-if="hit.suggestion" class="text-brand mt-0.5">💡 {{ hit.suggestion }}</p>
+                  <p v-if="hit.basisSnapshot" class="text-text-secondary mt-0.5">{{ hit.basisSnapshot }}</p>
                 </div>
               </div>
             </div>

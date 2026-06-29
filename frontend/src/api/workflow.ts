@@ -219,6 +219,16 @@ export type PrescriptionSubmitRequest = {
   manualConfirmation?: string | null;
 };
 
+export type PrescriptionRuleHit = {
+  ruleId: number | null;
+  ruleCode: string | null;
+  ruleType: string | null;
+  riskLevel: string | null;
+  alertMessage: string | null;
+  suggestion: string | null;
+  basisSnapshot: string | null;
+};
+
 export type PrescriptionReviewResponse = {
   reviewId: number | null;
   registrationId: number | null;
@@ -226,8 +236,10 @@ export type PrescriptionReviewResponse = {
   reviewStatus: string;
   riskLevel: string | null;
   localRuleHits: string | null;
+  ruleHits: PrescriptionRuleHit[];
   ruleEngineStatus: string | null;
   contextMissingItems: string | null;
+  contextMissingItemList: string[];
   llmSuggestion: string | null;
   llmSummary: string | null;
   llmCallStatus: string | null;
@@ -583,7 +595,10 @@ export type AiConfigWriteRequest = {
 };
 
 function unwrap<T>(response: Result<T>) {
-  if (!response.data) {
+  if (response.code !== 200) {
+    throw new Error(response.message || 'API error');
+  }
+  if (response.data === null || response.data === undefined) {
     throw new Error(response.message || 'empty response');
   }
   return response.data;
@@ -641,8 +656,15 @@ export async function listSchedules(departmentId?: number | null) {
   return unwrap((await http.get<Result<ScheduleOption[]>>('/schedules/available', { params: { departmentId } })).data);
 }
 
-export async function listAllSchedules(departmentId?: number | null, doctorId?: number | null) {
-  return unwrap((await http.get<Result<ScheduleOption[]>>('/admin/schedules', { params: { departmentId, doctorId } })).data);
+export async function listAllSchedules(
+  departmentId?: number | null,
+  doctorId?: number | null,
+  from?: string | null,
+  to?: string | null,
+) {
+  return unwrap((await http.get<Result<ScheduleOption[]>>('/admin/schedules', {
+    params: { departmentId, doctorId, from, to },
+  })).data);
 }
 
 export async function adminCreateSchedule(payload: ScheduleWriteRequest) {
@@ -771,6 +793,10 @@ export async function listDoctorPrescriptions() {
 
 export async function getPrescription(id: number) {
   return unwrap((await http.get<Result<PrescriptionSummary>>(`/prescription/${id}`)).data);
+}
+
+export async function getPrescriptionReview(id: number) {
+  return unwrap((await http.get<Result<PrescriptionReviewResponse>>(`/prescription/${id}/review`)).data);
 }
 
 export async function searchDrugs(keyword?: string) {

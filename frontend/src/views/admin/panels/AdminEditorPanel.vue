@@ -1,11 +1,54 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import SectionCard from '@/components/shared/SectionCard.vue';
 
 const { workspace } = defineProps<{ workspace: any }>();
+
+const kindLabels: Record<string, string> = {
+  department: '科室',
+  doctor: '医生',
+  schedule: '排班',
+  drug: '药品',
+  rule: '处方规则',
+  ai: 'AI 配置',
+  prompt: 'Prompt 模板',
+};
+
+type ScheduleDoctorOption = {
+  id: number;
+  name: string;
+  title?: string | null;
+  departmentId: number | null;
+};
+
+const editorTitle = computed(() => {
+  const action = workspace.currentId ? '编辑' : '新增';
+  return `${action}${kindLabels[workspace.currentKind] ?? '资料'}`;
+});
+
+const scheduleDoctors = computed<ScheduleDoctorOption[]>(() =>
+  (workspace.doctors as ScheduleDoctorOption[]).filter((doctor) =>
+    !workspace.scheduleForm.departmentId || doctor.departmentId === workspace.scheduleForm.departmentId,
+  ),
+);
+
+function onScheduleDepartmentChange() {
+  const hasCurrentDoctor = scheduleDoctors.value.some((doctor) => doctor.id === workspace.scheduleForm.doctorId);
+  if (!hasCurrentDoctor) {
+    workspace.scheduleForm.doctorId = scheduleDoctors.value[0]?.id ?? 0;
+  }
+}
+
+function onScheduleDoctorChange() {
+  const doctor = (workspace.doctors as ScheduleDoctorOption[]).find((item) => item.id === workspace.scheduleForm.doctorId);
+  if (doctor?.departmentId) {
+    workspace.scheduleForm.departmentId = doctor.departmentId;
+  }
+}
 </script>
 
 <template>
-  <SectionCard v-if="workspace.currentKind" :title="'编辑 ' + workspace.currentKind">
+  <SectionCard v-if="workspace.currentKind" :title="editorTitle">
     <div class="grid grid-cols-2 gap-3 text-sm">
       <template v-if="workspace.currentKind === 'department'">
         <label class="label-text">编码 <input v-model="workspace.departmentForm.code" class="input-field mt-1" /></label>
@@ -26,14 +69,42 @@ const { workspace } = defineProps<{ workspace: any }>();
       </template>
 
       <template v-else-if="workspace.currentKind === 'schedule'">
-        <label class="label-text">医生 ID <input v-model.number="workspace.scheduleForm.doctorId" type="number" min="1" class="input-field mt-1" /></label>
-        <label class="label-text">科室 ID <input v-model.number="workspace.scheduleForm.departmentId" type="number" min="1" class="input-field mt-1" /></label>
+        <label class="label-text">
+          科室
+          <select v-model.number="workspace.scheduleForm.departmentId" class="input-field mt-1" @change="onScheduleDepartmentChange">
+            <option v-for="department in workspace.departments" :key="department.id" :value="department.id">
+              {{ department.name }}
+            </option>
+          </select>
+        </label>
+        <label class="label-text">
+          医生
+          <select v-model.number="workspace.scheduleForm.doctorId" class="input-field mt-1" @change="onScheduleDoctorChange">
+            <option v-if="!scheduleDoctors.length" :value="0">暂无可选医生</option>
+            <option v-for="doctor in scheduleDoctors" :key="doctor.id" :value="doctor.id">
+              {{ doctor.name }}{{ doctor.title ? ` · ${doctor.title}` : '' }}
+            </option>
+          </select>
+        </label>
         <label class="label-text">日期 <input v-model="workspace.scheduleForm.workDate" type="date" class="input-field mt-1" /></label>
-        <label class="label-text">时段 <input v-model="workspace.scheduleForm.period" class="input-field mt-1" /></label>
+        <label class="label-text">
+          时段
+          <select v-model="workspace.scheduleForm.period" class="input-field mt-1">
+            <option value="上午">上午</option>
+            <option value="下午">下午</option>
+            <option value="夜诊">夜诊</option>
+          </select>
+        </label>
         <label class="label-text">总号源 <input v-model.number="workspace.scheduleForm.totalSlots" type="number" min="1" class="input-field mt-1" /></label>
         <label class="label-text">剩余号源 <input v-model.number="workspace.scheduleForm.remainingSlots" type="number" min="0" class="input-field mt-1" /></label>
         <label class="label-text">级别 <input v-model="workspace.scheduleForm.visitLevel" class="input-field mt-1" /></label>
-        <label class="label-text">状态 <input v-model="workspace.scheduleForm.status" class="input-field mt-1" /></label>
+        <label class="label-text">
+          状态
+          <select v-model="workspace.scheduleForm.status" class="input-field mt-1">
+            <option value="ACTIVE">启用</option>
+            <option value="INACTIVE">停用</option>
+          </select>
+        </label>
       </template>
 
       <template v-else-if="workspace.currentKind === 'drug'">

@@ -27,6 +27,7 @@ import com.cloudbrain.dto.workflow.WorkflowDtos.NotificationRecordSummary;
 import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionItemRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionItemSummary;
 import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionRuleSummary;
+import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionRuleHit;
 import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionReviewRequest;
 import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionReviewResponse;
 import com.cloudbrain.dto.workflow.WorkflowDtos.PrescriptionSubmitRequest;
@@ -247,6 +248,7 @@ public class WorkflowService {
                 );
         return schedules.stream()
                 .filter(schedule -> !schedule.getWorkDate().isBefore(LocalDate.now()))
+                .filter(schedule -> isActiveDoctorAndDepartment(schedule, doctors, departments))
                 .map(schedule -> toScheduleOption(schedule, doctors.get(schedule.getDoctorId()), departments.get(schedule.getDepartmentId())))
                 .toList();
     }
@@ -258,6 +260,7 @@ public class WorkflowService {
         return scheduleRepository.findAll().stream()
                 .filter(schedule -> departmentId == null || Objects.equals(schedule.getDepartmentId(), departmentId))
                 .filter(schedule -> ACTIVE.equals(schedule.getStatus()))
+                .filter(schedule -> isActiveDoctorAndDepartment(schedule, doctors, departments))
                 .sorted(Comparator.comparing(ScheduleEntity::getWorkDate).thenComparing(ScheduleEntity::getPeriod))
                 .map(schedule -> toScheduleOption(schedule, doctors.get(schedule.getDoctorId()), departments.get(schedule.getDepartmentId())))
                 .toList();
@@ -273,6 +276,8 @@ public class WorkflowService {
                 .filter(schedule -> ACTIVE.equals(schedule.getStatus()))
                 .filter(schedule -> schedule.getRemainingSlots() != null && schedule.getRemainingSlots() > 0)
                 .filter(schedule -> !schedule.getWorkDate().isBefore(LocalDate.now()))
+                .filter(schedule -> departments.get(schedule.getDepartmentId()) != null
+                        && ACTIVE.equals(departments.get(schedule.getDepartmentId()).getStatus()))
                 .sorted(Comparator.comparing(ScheduleEntity::getWorkDate).thenComparing(ScheduleEntity::getPeriod))
                 .map(schedule -> toScheduleOption(schedule, doctor, departments.get(schedule.getDepartmentId())))
                 .toList();
@@ -473,8 +478,10 @@ public class WorkflowService {
         }
         schedule = scheduleRepository.findById(schedule.getId()).orElseThrow();
 
-        DoctorEntity doctor = doctorRepository.findById(schedule.getDoctorId()).orElseThrow(() -> notFound("doctor not found"));
-        DepartmentEntity department = departmentRepository.findById(schedule.getDepartmentId()).orElseThrow(() -> notFound("department not found"));
+        DoctorEntity doctor = doctorRepository.findByIdAndStatus(schedule.getDoctorId(), ACTIVE).orElseThrow(() -> conflict("doctor is unavailable"));
+        DepartmentEntity department = departmentRepository.findById(schedule.getDepartmentId())
+                .filter(entity -> ACTIVE.equals(entity.getStatus()))
+                .orElseThrow(() -> conflict("department is unavailable"));
 
         RegistrationEntity registration = new RegistrationEntity();
         registration.setPatientId(patientId);
@@ -893,7 +900,7 @@ public class WorkflowService {
                                                         Consumer<String> chunkConsumer) {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
-        if (!List.of(MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED, PRESCRIPTION_SUBMITTED).contains(registration.getStatus())) {
+        if (!List.of(MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED).contains(registration.getStatus())) {
             throw conflict("please save medical record before prescription review");
         }
         List<PrescriptionItemRequest> items = requirePrescriptionItems(request.items());
@@ -938,11 +945,11 @@ public class WorkflowService {
         entity.setPatientId(registration.getPatientId());
         entity.setRiskLevel(review.riskLevel());
         entity.setLocalRuleHits(review.localRuleHits());
-        entity.setRuleEngineStatus("COMPLETED");
+        entity.setRuleEngineStatus(review.ruleEngineStatus());
         entity.setContextMissingItems(review.contextMissingItems());
         entity.setLlmSuggestion(firstNonBlank(AITextParser.firstNonBlank(reviewParsed, "llmSuggestion", null), review.suggestion()));
         entity.setLlmSummary(firstNonBlank(AITextParser.firstNonBlank(reviewParsed, "llmSummary", null), review.summary()));
-        entity.setLlmCallStatus(aiOutcome.meta().provider());
+        entity.setLlmCallStatus(aiOutcome.meta().degraded() ? "DEGRADED" : aiOutcome.meta().provider());
         entity.setAiCallRecordId(callRecord.getId());
         entity.setPrescriptionSnapshotHash(hashItems(items));
         entity.setReviewContextHash(hashContext(registration));
@@ -956,7 +963,7 @@ public class WorkflowService {
 
         registration.setStatus(PRESCRIPTION_REVIEWED);
         registrationRepository.save(registration);
-        return toReviewResponse(entity, null, toItemSummariesFromRequest(items, drugs));
+        return toReviewResponse(entity, null, toItemSummariesFromRequest(items, drugs), review.ruleHits(), review.contextMissingItemList(), aiOutcome.meta().degraded());
     }
 
     @Transactional
@@ -1033,6 +1040,27 @@ public class WorkflowService {
             throw new ApiException(HttpStatus.FORBIDDEN.value(), "prescription permission required");
         }
         return toPrescriptionSummary(prescription);
+    }
+
+    @Transactional(readOnly = true)
+    public PrescriptionReviewResponse getPrescriptionReview(ActorContext actorContext, Long prescriptionId) {
+        PrescriptionEntity prescription = prescriptionRepository.findById(prescriptionId)
+                .orElseThrow(() -> notFound("prescription not found"));
+        if (actorContext == null
+                || !(actorContext.isAdmin()
+                || (actorContext.isPatient() && Objects.equals(prescription.getPatientId(), actorContext.patientId()))
+                || (actorContext.isDoctor() && Objects.equals(prescription.getDoctorId(), actorContext.doctorId())))) {
+            throw new ApiException(HttpStatus.FORBIDDEN.value(), "prescription permission required");
+        }
+        PrescriptionReviewEntity review = prescription.getReviewId() == null
+                ? prescriptionReviewRepository.findByPrescriptionIdOrderByCreatedAtDesc(prescription.getId()).stream()
+                        .findFirst()
+                        .orElse(null)
+                : prescriptionReviewRepository.findById(prescription.getReviewId()).orElse(null);
+        if (review == null) {
+            throw notFound("prescription review not found");
+        }
+        return toReviewResponse(review, prescription.getId(), prescriptionItemsFor(prescription.getId()));
     }
 
     @Transactional(readOnly = true)
@@ -1558,52 +1586,296 @@ public class WorkflowService {
                                             List<PrescriptionItemRequest> items,
                                             List<DrugEntity> drugs) {
         PatientEntity patient = patientRepository.findById(registration.getPatientId()).orElseThrow();
-        List<String> hits = new ArrayList<>();
+        MedicalRecordEntity latestRecord = medicalRecordRepository.findFirstByRegistrationIdOrderByVersionDesc(registration.getId())
+                .orElse(null);
+        String diagnosisContext = String.join(" ",
+                firstNonBlank(latestRecord == null ? null : latestRecord.getChiefComplaint(), ""),
+                firstNonBlank(latestRecord == null ? null : latestRecord.getPresentIllness(), ""),
+                firstNonBlank(latestRecord == null ? null : latestRecord.getPreliminaryDiagnosis(), ""),
+                firstNonBlank(patient.getMedicalHistory(), ""),
+                firstNonBlank(patient.getRemark(), "")
+        );
+        List<PrescriptionRuleHit> hits = new ArrayList<>();
+        List<String> missingItems = new ArrayList<>();
         String risk = "LOW";
         Set<Long> seen = new HashSet<>();
         for (int i = 0; i < items.size(); i++) {
             PrescriptionItemRequest item = items.get(i);
             DrugEntity drug = drugs.get(i);
             if (!seen.add(item.drugId())) {
-                hits.add("重复用药：" + drug.getName() + " 在处方中出现多次。");
+                hits.add(ruleHit(null, "LOCAL_DUPLICATE_" + drug.getId(), "DUPLICATE_DRUG", "MEDIUM",
+                        "重复用药：" + drug.getName() + " 在处方中出现多次。",
+                        "请删除重复药品或确认联合使用理由。",
+                        "处方项药品 ID 重复"));
                 risk = maxRisk(risk, "MEDIUM");
             }
             if (patient.getAllergyHistory() != null
                     && !patient.getAllergyHistory().contains("无")
                     && drug.getContraindications() != null
                     && drug.getContraindications().contains(patient.getAllergyHistory())) {
-                hits.add("过敏风险：" + patient.getAllergyHistory() + " 与 " + drug.getName() + " 禁忌信息相关。");
+                hits.add(ruleHit(null, "LOCAL_ALLERGY_" + drug.getId(), "ALLERGY_CONTRAINDICATION", "HIGH",
+                        "过敏风险：" + patient.getAllergyHistory() + " 与 " + drug.getName() + " 禁忌信息相关。",
+                        "建议更换药品或补充人工确认。",
+                        "患者过敏史与药品禁忌信息交叉匹配"));
                 risk = maxRisk(risk, "HIGH");
             }
+            if (matchesText(diagnosisContext, drug.getContraindications())) {
+                hits.add(ruleHit(null, "LOCAL_DISEASE_" + drug.getId(), "DISEASE_CONTRAINDICATION", "HIGH",
+                        "疾病禁忌：" + drug.getName() + " 的禁忌信息与当前诊断/病史存在交叉。",
+                        "请复核诊断、病史和药品说明书后再提交。",
+                        "诊断/病史与药品禁忌信息交叉匹配"));
+                risk = maxRisk(risk, "HIGH");
+            }
+            if (matchesSpecialPopulation(patient, diagnosisContext, drug.getPrecautions())) {
+                hits.add(ruleHit(null, "LOCAL_POPULATION_" + drug.getId(), "SPECIAL_POPULATION", "MEDIUM",
+                        "特殊人群提醒：" + drug.getName() + " 的注意事项可能适用于当前患者。",
+                        "请结合年龄、性别、孕产/儿童/老年等情况复核用药。",
+                        "患者特殊人群特征与药品注意事项交叉匹配"));
+                risk = maxRisk(risk, "MEDIUM");
+            }
             if (item.quantity() != null && item.quantity() > 30) {
-                hits.add("数量偏高：" + drug.getName() + " 数量超过 30，请确认疗程。");
+                hits.add(ruleHit(null, "LOCAL_QUANTITY_" + drug.getId(), "COURSE_LIMIT", "MEDIUM",
+                        "数量偏高：" + drug.getName() + " 数量超过 30，请确认疗程。",
+                        "请复核疗程长度与复诊计划。",
+                        "本地演示规则：处方数量超过 30"));
                 risk = maxRisk(risk, "MEDIUM");
             }
             if (item.dosage() != null && item.dosage().compareTo(new BigDecimal("2.00")) > 0) {
-                hits.add("剂量提醒：" + drug.getName() + " 单次剂量较高，请结合说明书。");
+                hits.add(ruleHit(null, "LOCAL_DOSAGE_" + drug.getId(), "DOSAGE_LIMIT", "MEDIUM",
+                        "剂量提醒：" + drug.getName() + " 单次剂量较高，请结合说明书。",
+                        "请复核单次剂量和给药频次。",
+                        "本地演示规则：单次剂量超过 2.00"));
+                risk = maxRisk(risk, "MEDIUM");
+            }
+            if (isHighFrequency(item.frequency())) {
+                hits.add(ruleHit(null, "LOCAL_FREQUENCY_" + drug.getId(), "FREQUENCY_LIMIT", "MEDIUM",
+                        "频次提醒：" + drug.getName() + " 给药频次较高，请确认用法。",
+                        "请按说明书复核每日用药次数。",
+                        "本地演示规则：频次包含 tid/qid/每日3次以上"));
                 risk = maxRisk(risk, "MEDIUM");
             }
         }
+        for (int i = 0; i < drugs.size(); i++) {
+            DrugEntity left = drugs.get(i);
+            for (int j = i + 1; j < drugs.size(); j++) {
+                DrugEntity right = drugs.get(j);
+                if (containsNormalized(left.getInteractionSummary(), right.getName())
+                        || containsNormalized(right.getInteractionSummary(), left.getName())) {
+                    hits.add(ruleHit(null, "LOCAL_INTERACTION_" + left.getId() + "_" + right.getId(), "DRUG_INTERACTION", "MEDIUM",
+                            "相互作用提醒：" + left.getName() + " 与 " + right.getName() + " 可能存在相互作用。",
+                            "请复核药品相互作用说明，必要时调整处方。",
+                            "药品相互作用摘要交叉匹配"));
+                    risk = maxRisk(risk, "MEDIUM");
+                }
+            }
+        }
         for (PrescriptionRuleDefinitionEntity rule : ruleRepository.findByStatusOrderByRuleCodeAsc(ACTIVE)) {
-            for (DrugEntity drug : drugs) {
-                if (rule.getApplicableDrugs() != null && rule.getApplicableDrugs().contains(drug.getName())) {
-                    hits.add(rule.getAlertMessage() == null ? "命中规则：" + rule.getRuleCode() : rule.getAlertMessage());
+            for (int i = 0; i < drugs.size(); i++) {
+                DrugEntity drug = drugs.get(i);
+                PrescriptionItemRequest item = items.get(i);
+                if (ruleApplies(rule, drug, item, patient, diagnosisContext)) {
+                    String ruleRisk = firstNonBlank(rule.getRiskLevel(), "MEDIUM");
+                    hits.add(ruleHit(rule.getId(), rule.getRuleCode(), rule.getRuleType(), ruleRisk,
+                            firstNonBlank(rule.getAlertMessage(), "命中规则：" + rule.getRuleCode()),
+                            rule.getSuggestion(),
+                            rule.getBasis()));
                     risk = maxRisk(risk, firstNonBlank(rule.getRiskLevel(), "MEDIUM"));
                 }
             }
         }
         if (hits.isEmpty()) {
-            hits.add("未命中高风险本地规则，仍需医生结合患者情况确认。");
+            hits.add(ruleHit(null, "LOCAL_NO_HIGH_RISK", "GENERAL_REVIEW", "LOW",
+                    "未命中高风险本地规则，仍需医生结合患者情况确认。",
+                    "建议常规复核后提交。",
+                    "本地规则未命中中高风险项"));
         }
-        String missing = medicalRecordRepository.findFirstByRegistrationIdOrderByVersionDesc(registration.getId()).isPresent()
-                ? ""
-                : "缺少已保存病历上下文";
+        if (latestRecord == null) {
+            missingItems.add("缺少已保存病历上下文");
+        }
+        String missing = String.join("\n", missingItems);
+        String ruleEngineStatus = missingItems.isEmpty() ? "SUCCESS" : "CONTEXT_MISSING";
         String summary = switch (risk) {
             case "HIGH" -> "本地规则判断存在高风险，建议调整处方或补充人工确认。";
             case "MEDIUM" -> "本地规则判断存在中等风险，建议医生复核剂量、疗程或禁忌。";
             default -> "本地规则未发现明显风险，建议常规复核后提交。";
         };
-        return new ReviewComputation(risk, String.join("\n", hits), missing, summary, summary);
+        return new ReviewComputation(risk, summarizeRuleHits(hits), hits, ruleEngineStatus, missing, missingItems, summary, summary);
+    }
+
+    private PrescriptionRuleHit ruleHit(Long ruleId,
+                                        String ruleCode,
+                                        String ruleType,
+                                        String riskLevel,
+                                        String alertMessage,
+                                        String suggestion,
+                                        String basisSnapshot) {
+        return new PrescriptionRuleHit(
+                ruleId,
+                firstNonBlank(ruleCode, "LOCAL_RULE"),
+                firstNonBlank(ruleType, "GENERAL_REVIEW"),
+                firstNonBlank(riskLevel, "MEDIUM").toUpperCase(Locale.ROOT),
+                alertMessage,
+                suggestion,
+                basisSnapshot
+        );
+    }
+
+    private String summarizeRuleHits(List<PrescriptionRuleHit> hits) {
+        return hits.stream()
+                .map(hit -> "[" + firstNonBlank(hit.riskLevel(), "UNKNOWN") + "] "
+                        + firstNonBlank(hit.alertMessage(), firstNonBlank(hit.ruleCode(), "命中规则")))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private boolean ruleApplies(PrescriptionRuleDefinitionEntity rule,
+                                DrugEntity drug,
+                                PrescriptionItemRequest item,
+                                PatientEntity patient,
+                                String diagnosisContext) {
+        boolean hasDrugCondition = !isBlank(rule.getApplicableDrugs());
+        boolean hasDiseaseCondition = !isBlank(rule.getApplicableDiseases());
+        boolean hasPopulationCondition = !isBlank(rule.getApplicablePopulations());
+        boolean hasExpressionCondition = !isBlank(rule.getConditionExpression());
+        if (!hasDrugCondition && !hasDiseaseCondition && !hasPopulationCondition && !hasExpressionCondition) {
+            return false;
+        }
+        if (hasDrugCondition && !matchesAnyToken(rule.getApplicableDrugs(), drug.getName(), drug.getCode())) {
+            return false;
+        }
+        if (hasDiseaseCondition && !matchesAnyToken(rule.getApplicableDiseases(), diagnosisContext)) {
+            return false;
+        }
+        if (hasPopulationCondition && !matchesPopulation(rule.getApplicablePopulations(), patient, diagnosisContext)) {
+            return false;
+        }
+        return !hasExpressionCondition || matchesConditionExpression(rule.getConditionExpression(), item, diagnosisContext);
+    }
+
+    private boolean matchesText(String source, String candidateTerms) {
+        return matchesAnyToken(candidateTerms, source);
+    }
+
+    private boolean matchesAnyToken(String terms, String... sources) {
+        if (isBlank(terms) || sources == null || sources.length == 0) {
+            return false;
+        }
+        for (String token : splitTerms(terms)) {
+            for (String source : sources) {
+                if (containsNormalized(source, token)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private List<String> splitTerms(String terms) {
+        if (terms == null) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(terms.split("[,，;；、/\\n\\r\\t ]+"))
+                .map(String::trim)
+                .filter(token -> token.length() >= 2)
+                .distinct()
+                .toList();
+    }
+
+    private boolean matchesSpecialPopulation(PatientEntity patient, String diagnosisContext, String precautions) {
+        if (isBlank(precautions)) {
+            return false;
+        }
+        String patientContext = patientPopulationContext(patient, diagnosisContext);
+        return splitTerms(precautions).stream()
+                .anyMatch(token -> containsNormalized(patientContext, token)
+                        || ("老年".equals(token) && isElderly(patient))
+                        || ("儿童".equals(token) && isChild(patient))
+                        || ("孕妇".equals(token) && containsNormalized(patientContext, "孕")));
+    }
+
+    private boolean matchesPopulation(String populationTerms, PatientEntity patient, String diagnosisContext) {
+        String patientContext = patientPopulationContext(patient, diagnosisContext);
+        return splitTerms(populationTerms).stream().anyMatch(token ->
+                containsNormalized(patientContext, token)
+                        || ("老年".equals(token) && isElderly(patient))
+                        || ("老人".equals(token) && isElderly(patient))
+                        || ("儿童".equals(token) && isChild(patient))
+                        || ("小儿".equals(token) && isChild(patient))
+                        || ("孕妇".equals(token) && containsNormalized(patientContext, "孕"))
+        );
+    }
+
+    private String patientPopulationContext(PatientEntity patient, String diagnosisContext) {
+        return String.join(" ",
+                firstNonBlank(patient.getGender(), ""),
+                patient.getAge() == null ? "" : patient.getAge().toString(),
+                firstNonBlank(patient.getMedicalHistory(), ""),
+                firstNonBlank(patient.getAllergyHistory(), ""),
+                firstNonBlank(patient.getRemark(), ""),
+                firstNonBlank(diagnosisContext, ""),
+                isElderly(patient) ? "老年 老人" : "",
+                isChild(patient) ? "儿童 小儿" : ""
+        );
+    }
+
+    private boolean isElderly(PatientEntity patient) {
+        return patient.getAge() != null && patient.getAge() >= 65;
+    }
+
+    private boolean isChild(PatientEntity patient) {
+        return patient.getAge() != null && patient.getAge() < 14;
+    }
+
+    private boolean matchesConditionExpression(String expression, PrescriptionItemRequest item, String diagnosisContext) {
+        if (isBlank(expression)) {
+            return true;
+        }
+        String normalized = expression.toLowerCase(Locale.ROOT).replace(" ", "");
+        if (normalized.startsWith("quantity>")) {
+            return item.quantity() != null && item.quantity() > parseIntAfter(normalized, "quantity>");
+        }
+        if (normalized.startsWith("dosage>")) {
+            return item.dosage() != null && item.dosage().compareTo(parseDecimalAfter(normalized, "dosage>")) > 0;
+        }
+        if (normalized.contains("frequency") && normalized.contains(">")) {
+            return isHighFrequency(item.frequency());
+        }
+        return matchesAnyToken(expression, diagnosisContext, item.frequency(), item.duration(), item.usageInstruction());
+    }
+
+    private int parseIntAfter(String expression, String prefix) {
+        try {
+            return Integer.parseInt(expression.substring(prefix.length()).replaceAll("[^0-9].*$", ""));
+        } catch (RuntimeException ignored) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    private BigDecimal parseDecimalAfter(String expression, String prefix) {
+        try {
+            String value = expression.substring(prefix.length()).replaceAll("[^0-9.].*$", "");
+            return new BigDecimal(value);
+        } catch (RuntimeException ignored) {
+            return new BigDecimal("999999");
+        }
+    }
+
+    private boolean isHighFrequency(String frequency) {
+        if (frequency == null) {
+            return false;
+        }
+        String normalized = frequency.toLowerCase(Locale.ROOT);
+        return normalized.contains("tid")
+                || normalized.contains("qid")
+                || normalized.contains("每日3")
+                || normalized.contains("每天3")
+                || normalized.contains("一日3")
+                || normalized.contains("每日4")
+                || normalized.contains("每天4")
+                || normalized.contains("一日4");
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private String maxRisk(String current, String candidate) {
@@ -1788,6 +2060,22 @@ public class WorkflowService {
     private PrescriptionReviewResponse toReviewResponse(PrescriptionReviewEntity review,
                                                         Long prescriptionId,
                                                         List<PrescriptionItemSummary> items) {
+        return toReviewResponse(
+                review,
+                prescriptionId,
+                items,
+                ruleHitsFromReview(review),
+                contextMissingItemList(review.getContextMissingItems()),
+                reviewDegraded(review)
+        );
+    }
+
+    private PrescriptionReviewResponse toReviewResponse(PrescriptionReviewEntity review,
+                                                        Long prescriptionId,
+                                                        List<PrescriptionItemSummary> items,
+                                                        List<PrescriptionRuleHit> ruleHits,
+                                                        List<String> contextMissingItemList,
+                                                        boolean degraded) {
         String bindStatus = firstNonBlank(review.getBindStatus(), "UNBOUND");
         String reviewStatus = "BOUND".equalsIgnoreCase(bindStatus) ? "BOUND" : "REVIEWED";
         String ruleEngineStatus = normalizeRuleEngineStatus(review.getRuleEngineStatus(), review.getContextMissingItems());
@@ -1799,17 +2087,68 @@ public class WorkflowService {
                 reviewStatus,
                 review.getRiskLevel(),
                 review.getLocalRuleHits(),
+                ruleHits == null ? List.of() : ruleHits,
                 ruleEngineStatus,
                 review.getContextMissingItems(),
+                contextMissingItemList == null ? List.of() : contextMissingItemList,
                 review.getLlmSuggestion(),
                 review.getLlmSummary(),
                 llmCallStatus,
                 review.getPrescriptionSnapshotHash(),
                 review.getReviewContextHash(),
-                false,
+                degraded,
                 bindStatus,
                 items
         );
+    }
+
+    private List<PrescriptionRuleHit> ruleHitsFromReview(PrescriptionReviewEntity review) {
+        if (review == null || review.getLocalRuleHits() == null || review.getLocalRuleHits().isBlank()) {
+            return List.of();
+        }
+        return splitLines(review.getLocalRuleHits()).stream()
+                .map(line -> {
+                    String risk = "LOW";
+                    String text = line;
+                    if (line.startsWith("[") && line.contains("]")) {
+                        int end = line.indexOf(']');
+                        risk = line.substring(1, end);
+                        text = line.substring(end + 1).trim();
+                    } else if (containsNormalized(line, "高风险") || containsNormalized(line, "禁忌") || containsNormalized(line, "过敏")) {
+                        risk = "HIGH";
+                    } else if (containsNormalized(line, "提醒") || containsNormalized(line, "偏高") || containsNormalized(line, "重复")) {
+                        risk = "MEDIUM";
+                    }
+                    return ruleHit(null, "LEGACY_TEXT", "LEGACY_REVIEW", risk, text, null, "历史文本审核记录");
+                })
+                .toList();
+    }
+
+    private List<String> contextMissingItemList(String missingItems) {
+        return splitLines(missingItems);
+    }
+
+    private List<String> splitLines(String text) {
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(text.split("\\r?\\n"))
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .toList();
+    }
+
+    private boolean reviewDegraded(PrescriptionReviewEntity review) {
+        if (review == null) {
+            return false;
+        }
+        if ("DEGRADED".equalsIgnoreCase(review.getLlmCallStatus())) {
+            return true;
+        }
+        return review.getAiCallRecordId() != null
+                && aiCallRecordRepository.findById(review.getAiCallRecordId())
+                        .map(record -> Boolean.TRUE.equals(record.getDegraded()))
+                        .orElse(false);
     }
 
     private DiagnosisSuggestionRecordEntity requireDoctorDiagnosisSuggestion(Long suggestionId, Long doctorId) {
@@ -2159,6 +2498,17 @@ public class WorkflowService {
         return doctorRepository.findAll().stream().collect(Collectors.toMap(DoctorEntity::getId, Function.identity()));
     }
 
+    private boolean isActiveDoctorAndDepartment(ScheduleEntity schedule,
+                                                Map<Long, DoctorEntity> doctors,
+                                                Map<Long, DepartmentEntity> departments) {
+        DoctorEntity doctor = doctors.get(schedule.getDoctorId());
+        DepartmentEntity department = departments.get(schedule.getDepartmentId());
+        return doctor != null
+                && department != null
+                && ACTIVE.equals(doctor.getStatus())
+                && ACTIVE.equals(department.getStatus());
+    }
+
     private String firstNonBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
     }
@@ -2276,7 +2626,10 @@ public class WorkflowService {
     private record ReviewComputation(
             String riskLevel,
             String localRuleHits,
+            List<PrescriptionRuleHit> ruleHits,
+            String ruleEngineStatus,
             String contextMissingItems,
+            List<String> contextMissingItemList,
             String suggestion,
             String summary
     ) {

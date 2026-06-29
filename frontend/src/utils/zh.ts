@@ -32,6 +32,18 @@ const MESSAGE_LABELS: Record<string, string> = {
   'register failed': '注册失败',
 };
 
+const BUSINESS_MESSAGE_LABELS: Record<string, string> = {
+  'please save medical record before prescription review': '请先保存正式病历，再进行处方审核',
+  'prescription changed after review, please review again': '处方内容已变化，请重新审核',
+  'doctor is unavailable': '医生已停用，无法挂号',
+  'department is unavailable': '科室已停用，无法挂号',
+  'active schedule requires active doctor and department': '启用排班需要选择启用状态的医生和科室',
+  'remaining slots cannot exceed total slots': '剩余号源不能大于总号源',
+  'schedule is unavailable': '该号源不可预约',
+  'prescription review not found': '未找到处方审核结果',
+  'prescription permission required': '无权查看该处方',
+};
+
 function hasChinese(text: string) {
   return /[\u4e00-\u9fff]/.test(text);
 }
@@ -110,7 +122,7 @@ export function getUiMessage(message: string | null | undefined, fallback: strin
     return normalized;
   }
 
-  return MESSAGE_LABELS[normalized] ?? fallback;
+  return BUSINESS_MESSAGE_LABELS[normalized] ?? MESSAGE_LABELS[normalized] ?? fallback;
 }
 
 export function resolveUiErrorMessage(error: unknown, fallback: string) {

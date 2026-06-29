@@ -495,7 +495,11 @@ public class AdminService {
 
     private ScheduleEntity saveSchedule(ScheduleEntity entity, ScheduleRequest request) {
         DoctorEntity doctor = requireDoctor(request.doctorId());
-        requireDepartment(request.departmentId());
+        DepartmentEntity department = requireDepartment(request.departmentId());
+        String normalizedStatus = normalizeStatus(request.status());
+        if (ACTIVE.equals(normalizedStatus) && (!ACTIVE.equals(doctor.getStatus()) || !ACTIVE.equals(department.getStatus()))) {
+            throw conflict("active schedule requires active doctor and department");
+        }
         Integer totalSlots = request.totalSlots();
         Integer remainingSlots = request.remainingSlots() == null ? totalSlots : request.remainingSlots();
         if (remainingSlots > totalSlots) {
@@ -508,7 +512,7 @@ public class AdminService {
         entity.setTotalSlots(totalSlots);
         entity.setRemainingSlots(remainingSlots);
         entity.setVisitLevel(request.visitLevel().trim());
-        entity.setStatus(normalizeStatus(request.status()));
+        entity.setStatus(normalizedStatus);
         return scheduleRepository.save(entity);
     }
 

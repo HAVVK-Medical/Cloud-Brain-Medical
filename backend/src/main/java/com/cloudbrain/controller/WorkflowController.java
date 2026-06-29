@@ -236,6 +236,11 @@ public class WorkflowController {
         return Result.success(workflowService.getPrescription(ActorContextResolver.requireCurrent(), id));
     }
 
+    @GetMapping("/prescription/{id}/review")
+    public Result<PrescriptionReviewResponse> getPrescriptionReview(@PathVariable Long id) {
+        return Result.success(workflowService.getPrescriptionReview(ActorContextResolver.requireCurrent(), id));
+    }
+
     @GetMapping("/feedback/list")
     public Result<List<FeedbackResponse>> listFeedback() {
         return Result.success(workflowService.listPatientFeedback(ActorContextResolver.requireCurrent()));

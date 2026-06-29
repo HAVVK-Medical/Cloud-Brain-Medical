@@ -122,7 +122,18 @@ const batchDoctors = computed(() =>
     </SectionCard>
 
     <SectionCard title="排班列表">
-      <div class="flex gap-2 mb-4">
+      <div class="mb-4 flex flex-wrap items-end gap-3">
+        <label class="label-text">
+          开始日期
+          <input v-model="workspace.scheduleFromDate" type="date" class="input-field mt-1 w-40" />
+        </label>
+        <label class="label-text">
+          结束日期
+          <input v-model="workspace.scheduleToDate" type="date" class="input-field mt-1 w-40" />
+        </label>
+        <button class="btn-secondary" type="button" @click="workspace.loadAll()" :disabled="workspace.loading">应用筛选</button>
+        <button class="btn-ghost" type="button" @click="workspace.clearFilters()">清空筛选</button>
+        <span class="flex-1" />
         <button class="btn-secondary" type="button" @click="workspace.createNew('schedule')"><Plus :size="16" /><span>新增排班</span></button>
       </div>
       <div v-if="workspace.visibleSchedules.length" class="overflow-x-auto">

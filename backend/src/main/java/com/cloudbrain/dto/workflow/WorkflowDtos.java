@@ -266,6 +266,17 @@ public final class WorkflowDtos {
     ) {
     }
 
+    public record PrescriptionRuleHit(
+            Long ruleId,
+            String ruleCode,
+            String ruleType,
+            String riskLevel,
+            String alertMessage,
+            String suggestion,
+            String basisSnapshot
+    ) {
+    }
+
     public record PrescriptionReviewResponse(
             Long reviewId,
             Long registrationId,
@@ -273,8 +284,10 @@ public final class WorkflowDtos {
             String reviewStatus,
             String riskLevel,
             String localRuleHits,
+            List<PrescriptionRuleHit> ruleHits,
             String ruleEngineStatus,
             String contextMissingItems,
+            List<String> contextMissingItemList,
             String llmSuggestion,
             String llmSummary,
             String llmCallStatus,
@@ -301,8 +314,10 @@ public final class WorkflowDtos {
                     "BOUND".equalsIgnoreCase(bindStatus) ? "BOUND" : "UNBOUND",
                     riskLevel,
                     localRuleHits,
+                    List.of(),
                     ruleEngineStatus,
                     "",
+                    List.of(),
                     llmSuggestion,
                     llmSummary,
                     "LOCAL_SIMULATED",

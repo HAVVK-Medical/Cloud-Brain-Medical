@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
   LayoutDashboard,
   Building2,
@@ -112,7 +112,10 @@ const auditLogs = ref<AuditLogSummary[]>([]);
 const notifications = ref<NotificationRecordSummary[]>([]);
 const departmentFilter = ref<number | null>(null);
 const doctorFilter = ref<number | null>(null);
+const scheduleFromDate = ref('');
+const scheduleToDate = ref('');
 const drugKeyword = ref('');
+const editorPanelRef = ref<HTMLElement | null>(null);
 const currentKind = ref<CurrentKind>('');
 const currentId = ref<number | null>(null);
 const notificationLoading = ref(false);
@@ -233,7 +236,9 @@ const selectedDoctor = computed(() => doctors.value.find((item) => item.id === d
 const visibleSchedules = computed(() =>
   schedules.value.filter((item) => {
     return (departmentFilter.value === null || item.departmentId === departmentFilter.value) &&
-      (doctorFilter.value === null || item.doctorId === doctorFilter.value);
+      (doctorFilter.value === null || item.doctorId === doctorFilter.value) &&
+      (!scheduleFromDate.value || item.workDate >= scheduleFromDate.value) &&
+      (!scheduleToDate.value || item.workDate <= scheduleToDate.value);
   }),
 );
 const paginatedDepartments = usePagination(computed(() => departments.value), 8);
@@ -302,6 +307,8 @@ const adminWorkspace = reactive({
   notifications,
   departmentFilter,
   doctorFilter,
+  scheduleFromDate,
+  scheduleToDate,
   drugKeyword,
   currentKind,
   currentId,
@@ -443,9 +450,11 @@ function resetDoctorForm(source?: DoctorOption | null) {
 }
 
 function resetScheduleForm(source?: ScheduleOption | null) {
+  const fallbackDoctor = doctors.value.find((item) => item.departmentId === departments.value[0]?.id) ?? doctors.value[0] ?? null;
+  const fallbackDepartmentId = fallbackDoctor?.departmentId ?? departments.value[0]?.id ?? 0;
   Object.assign(scheduleForm, {
-    doctorId: source?.doctorId ?? doctors.value[0]?.id ?? 0,
-    departmentId: source?.departmentId ?? departments.value[0]?.id ?? 0,
+    doctorId: source?.doctorId ?? fallbackDoctor?.id ?? 0,
+    departmentId: source?.departmentId ?? fallbackDepartmentId,
     workDate: source?.workDate ?? toDateInputValue(new Date()),
     period: source?.period ?? '上午',
     totalSlots: source?.totalSlots ?? 20,
@@ -539,6 +548,7 @@ function selectSchedule(item: ScheduleOption) {
   currentKind.value = 'schedule';
   currentId.value = item.id;
   resetScheduleForm(item);
+  revealEditor();
 }
 
 function selectDrug(item: DrugOption) {
@@ -568,6 +578,13 @@ function selectPrompt(item: PromptTemplateSummary) {
 function closeEditor() {
   currentId.value = null;
   currentKind.value = '';
+}
+
+function revealEditor() {
+  void nextTick(() => {
+    editorPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    editorPanelRef.value?.focus({ preventScroll: true });
+  });
 }
 
 function ensureDefaults() {
@@ -642,7 +659,12 @@ async function loadAll() {
       loadDashboardBundle(),
       adminListDepartments(),
       adminListDoctors(departmentFilter.value),
-      listAllSchedules(departmentFilter.value, doctorFilter.value),
+      listAllSchedules(
+        departmentFilter.value,
+        doctorFilter.value,
+        scheduleFromDate.value || null,
+        scheduleToDate.value || null,
+      ),
       adminListDrugs(drugKeyword.value.trim() || undefined, null),
       listPrescriptionRules(),
       listAiConfig(),
@@ -936,11 +958,14 @@ function createNew(kind: ResourceKind) {
   if (kind === 'rule') resetRuleForm();
   if (kind === 'ai') resetAiForm();
   if (kind === 'prompt') resetPromptForm();
+  revealEditor();
 }
 
 function clearFilters() {
   departmentFilter.value = null;
   doctorFilter.value = null;
+  scheduleFromDate.value = '';
+  scheduleToDate.value = '';
   drugKeyword.value = '';
   paginatedDepartments.resetPage();
   paginatedDoctors.resetPage();
@@ -973,7 +998,7 @@ watch(() => batchScheduleForm.departmentId, (departmentId) => {
   batchScheduleForm.doctorId = doctors.value.find((item) => item.departmentId === departmentId)?.id ?? doctors.value[0]?.id ?? 0;
 });
 
-watch([departmentFilter, doctorFilter, drugKeyword], () => {
+watch([departmentFilter, doctorFilter, scheduleFromDate, scheduleToDate, drugKeyword], () => {
   paginatedDepartments.resetPage();
   paginatedDoctors.resetPage();
   paginatedDrugs.resetPage();
@@ -1035,7 +1060,9 @@ onBeforeUnmount(() => {
         </Suspense>
       </RouterView>
 
-      <AdminEditorPanel :workspace="adminWorkspace" v-if="adminWorkspace.editorVisible" />
+      <div v-if="adminWorkspace.editorVisible" ref="editorPanelRef" class="mt-6 outline-none" tabindex="-1">
+        <AdminEditorPanel :workspace="adminWorkspace" />
+      </div>
     </div>
   </div>
 </template>
