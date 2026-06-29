@@ -1,4 +1,4 @@
-﻿package com.cloudbrain.application.workflow;
+package com.cloudbrain.application.workflow;
 
 import com.cloudbrain.application.ai.AIInvocationService;
 import com.cloudbrain.application.ai.AIModels;
@@ -412,10 +412,10 @@ public class WorkflowService {
 
         String reason = firstNonBlank(
                 request.reason(),
-                "鏍规嵁 AI 瀵硅瘽寮忛棶璇婄粨鏋滐紝寤鸿浼樺厛鍓嶅線" + finalDepartment.getName() + "銆?
+                "根据 AI 对话式问诊结果，建议优先前往" + finalDepartment.getName() + "。"
         );
         if (request.urgencyLevel() != null && !request.urgencyLevel().isBlank()) {
-            reason = reason + "\n绱ф€ョ▼搴︼細" + request.urgencyLevel().trim();
+            reason = reason + "\n紧急程度：" + request.urgencyLevel().trim();
         }
 
         AICallRecordEntity callRecord = aiCallRecord("TRIAGE", actorContext, chiefComplaint, reason, started);
@@ -653,13 +653,13 @@ public class WorkflowService {
         draft.setRegistrationId(registration.getId());
         draft.setChiefComplaint(firstNonBlank(aiDraft.chiefComplaint(), chief));
         draft.setPresentIllness(firstNonBlank(aiDraft.presentIllness(), request.conversationText()));
-        draft.setPastHistory(firstNonBlank(aiDraft.pastHistory(), firstNonBlank(patient.getMedicalHistory(), "鏈鐗规畩鏃㈠線鍙层€?)));
-        draft.setPhysicalExam(firstNonBlank(aiDraft.physicalExam(), "鐢熷懡浣撳緛骞崇ǔ锛屽缓璁尰鐢熺粨鍚堟煡浣撹ˉ鍏呫€?));
+        draft.setPastHistory(firstNonBlank(aiDraft.pastHistory(), firstNonBlank(patient.getMedicalHistory(), "未见特殊既往史")));
+        draft.setPhysicalExam(firstNonBlank(aiDraft.physicalExam(), "生命体征平稳，建议医生结合查体补充。"));
         draft.setPreliminaryDiagnosis(diagnosis);
         draft.setTreatmentPlan(firstNonBlank(aiDraft.treatmentPlan(), buildTreatmentPlan(diagnosis)));
         draft.setConversationText(request.conversationText());
         draft.setAiGenerated(true);
-        draft.setDocNote(firstNonBlank(aiDraft.docNote(), "鏈湴妯℃嫙 AI 宸叉牴鎹棶璇婃枃鏈敓鎴愮粨鏋勫寲鐥呭巻鑽夌锛岃鍖荤敓纭銆?));
+        draft.setDocNote(firstNonBlank(aiDraft.docNote(), "本地模拟 AI 已根据问诊文本生成结构化病历草稿，请医生确认。"));
         draft.setVersion(0);
 
         String output = draft.getChiefComplaint() + " | " + draft.getPreliminaryDiagnosis();
@@ -679,12 +679,12 @@ public class WorkflowService {
         Long doctorId = requireDoctor(actorContext);
         RegistrationEntity registration = requireDoctorRegistration(request.registrationId(), doctorId);
         if (!List.of(IN_CONSULTATION, MEDICAL_RECORD_SAVED, PRESCRIPTION_REVIEWED).contains(registration.getStatus())) {
-            String currentStatus = registration.getStatus() == null ? "鏈煡" : registration.getStatus();
+            String currentStatus = registration.getStatus() == null ? "未知" : registration.getStatus();
             String hint = switch (currentStatus) {
-                case "WAITING" -> "璇峰厛鐐瑰嚮銆屽紑濮嬫帴璇娿€嶅悗鍐嶄繚瀛樼梾鍘?;
-                case "COMPLETED" -> "璇ュ氨璇婂凡瀹屾垚锛屾棤娉曞啀淇濆瓨鐥呭巻";
-                case "CANCELLED" -> "璇ユ寕鍙峰凡鍙栨秷锛屾棤娉曚繚瀛樼梾鍘?;
-                default -> "褰撳墠灏辫瘖鐘舵€?" + currentStatus + ")涓嶅厑璁镐繚瀛樼梾鍘?;
+                case "WAITING" -> "请先点击“开始接诊”后再保存病历";
+                case "COMPLETED" -> "该就诊已完成，无法再保存病历";
+                case "CANCELLED" -> "该挂号已取消，无法保存病历";
+                default -> "当前就诊状态(" + currentStatus + ")不允许保存病历";
             };
             throw conflict(hint);
         }
@@ -704,12 +704,12 @@ public class WorkflowService {
         record.setPatientId(registration.getPatientId());
         record.setDoctorId(doctorId);
         record.setRegistrationId(registration.getId());
-        record.setChiefComplaint(firstNonBlank(request.chiefComplaint(), "鏈～鍐?));
+        record.setChiefComplaint(firstNonBlank(request.chiefComplaint(), "未填写"));
         record.setPresentIllness(firstNonBlank(request.presentIllness(), request.conversationText()));
-        record.setPastHistory(firstNonBlank(request.pastHistory(), "鏈～鍐?));
-        record.setPhysicalExam(firstNonBlank(request.physicalExam(), "鏈～鍐?));
-        record.setPreliminaryDiagnosis(firstNonBlank(request.preliminaryDiagnosis(), "寰呮槑纭?));
-        record.setTreatmentPlan(firstNonBlank(request.treatmentPlan(), "閬靛尰鍢辨不鐤楋紝蹇呰鏃跺璇娿€?));
+        record.setPastHistory(firstNonBlank(request.pastHistory(), "未填写"));
+        record.setPhysicalExam(firstNonBlank(request.physicalExam(), "未填写"));
+        record.setPreliminaryDiagnosis(firstNonBlank(request.preliminaryDiagnosis(), "待明确"));
+        record.setTreatmentPlan(firstNonBlank(request.treatmentPlan(), "遵医嘱治疗，必要时复诊。"));
         record.setConversationText(request.conversationText());
         record.setAiGenerated(Boolean.TRUE.equals(request.aiGenerated()));
         record.setDocNote(request.docNote());
@@ -807,9 +807,9 @@ public class WorkflowService {
                 variables,
                 request.attachments(),
                 String.join("\n",
-                        "suggestedDiagnoses: " + fallbackDiagnosis + "锛涢壌鍒細鐒﹁檻鐩稿叧涓嶉€傘€佹秷鍖栫郴缁熶笉閫傘€佸懠鍚哥郴缁熸劅鏌撱€?,
+                        "suggestedDiagnoses: " + fallbackDiagnosis + "；鉴别：焦虑相关不适、消化系统不适、呼吸系统感染。",
                         "suggestedExamItems: " + suggestExamItems(fallbackDiagnosis),
-                        "summary: 鏈湴瑙勫垯鏍规嵁鍏抽敭璇嶇敓鎴愯瘖鐤楀缓璁紝渚涘尰鐢熷弬鑰冦€?,
+                        "summary: 本地规则根据关键词生成诊疗建议，供医生参考。",
                         "finalDiagnosisDirection: " + fallbackDiagnosis
                 ),
                 chunkConsumer != null,
@@ -821,7 +821,7 @@ public class WorkflowService {
         entity.setRegistrationId(registration.getId());
         entity.setPatientId(registration.getPatientId());
         entity.setDoctorId(doctorId);
-        entity.setSuggestedDiagnoses(firstNonBlank(AITextParser.firstNonBlank(parsed, "suggestedDiagnoses", null), diagnosis + "\n閴村埆锛氱劍铏戠浉鍏充笉閫傘€佹秷鍖栫郴缁熶笉閫傘€佸懠鍚哥郴缁熸劅鏌撱€?));
+        entity.setSuggestedDiagnoses(firstNonBlank(AITextParser.firstNonBlank(parsed, "suggestedDiagnoses", null), diagnosis + "\n鉴别：焦虑相关不适、消化系统不适、呼吸系统感染。"));
         entity.setSuggestedExamItems(firstNonBlank(AITextParser.firstNonBlank(parsed, "suggestedExamItems", null), suggestExamItems(diagnosis)));
         entity.setAdoptionStatus("SUGGESTED");
         entity.setFinalDiagnosisDirection(diagnosis);
@@ -845,7 +845,7 @@ public class WorkflowService {
                 entity.getSuggestedDiagnoses(),
                 entity.getSuggestedExamItems(),
                 entity.getAdoptionStatus(),
-                "鏈湴瑙勫垯鏍规嵁鍏抽敭璇嶇敓鎴愯瘖鐤楀缓璁紝渚涘尰鐢熷弬鑰冦€?,
+                "本地规则根据关键词生成诊疗建议，供医生参考。",
                 aiOutcome.meta().degraded()
         );
     }
@@ -862,7 +862,7 @@ public class WorkflowService {
         entity.setAdoptionDoctorId(doctorId);
         entity.setAdoptionTime(LocalDateTime.now());
         entity = diagnosisSuggestionRepository.save(entity);
-        return toDiagnosisSuggestionResponse(entity, "宸查噰绾宠瘖鏂缓璁€?, false);
+        return toDiagnosisSuggestionResponse(entity, "已采纳诊断建议。", false);
     }
 
     @Transactional
@@ -879,7 +879,7 @@ public class WorkflowService {
             entity.setFinalDiagnosisDirection(reason);
         }
         entity = diagnosisSuggestionRepository.save(entity);
-        return toDiagnosisSuggestionResponse(entity, "宸插拷鐣ヨ瘖鏂缓璁€?, false);
+        return toDiagnosisSuggestionResponse(entity, "已忽略诊断建议。", false);
     }
 
     @Transactional
@@ -1389,29 +1389,29 @@ public class WorkflowService {
     private DepartmentEntity pickExpandedDepartment(String complaint) {
         String normalized = complaint == null ? "" : complaint.toLowerCase(Locale.ROOT);
         String code;
-        if (containsAny(normalized, "鑳哥棝", "鑳搁椃", "蹇冩偢", "蹇冩厡", "琛€鍘嬮珮", "楂樿鍘?, "琛€鍘嬪紓甯?, "蹇冪粸鐥?, "蹇冭“", "蹇冨緥澶卞父")) {
+        if (containsAny(normalized, "胸痛", "胸闷", "心悸", "心慌", "血压高", "高血压", "血压异常", "心绞痛", "心衰", "心律失常")) {
             code = "cardiology";
-        } else if (containsAny(normalized, "澶寸棝", "鐪╂檿", "鎶芥悙", "鐧棲", "涓", "楹绘湪", "澶辩湢", "璁板繂", "甯曢噾妫?, "鑴戞", "鑴戝嚭琛€")) {
+        } else if (containsAny(normalized, "头痛", "眩晕", "抽搐", "癫痫", "中风", "麻木", "失眠", "记忆", "帕金森", "脑梗", "脑出血")) {
             code = "neurology";
-        } else if (containsAny(normalized, "楠ㄦ姌", "鍏宠妭鐥?, "鑵扮棝", "鑵拌吙鐥?, "鎵激", "棰堟", "鑴婃煴", "楠ㄧ棝", "杩愬姩鎹熶激", "鑲╃棝")) {
+        } else if (containsAny(normalized, "骨折", "关节痛", "腰痛", "腰腿痛", "扭伤", "颈椎", "脊柱", "骨痛", "运动损伤", "肩痛")) {
             code = "orthopedics";
-        } else if (containsAny(normalized, "鐨柟", "杩囨晱", "鐨偆", "鐦欑棐", "鐥ょ柈", "婀跨柟", "鑽ㄩ夯鐤?, "閾跺睉鐥?, "鐪熻弻鎰熸煋", "鑴卞彂")) {
+        } else if (containsAny(normalized, "皮疹", "过敏", "皮肤", "瘙痒", "痤疮", "湿疹", "荨麻疹", "银屑病", "真菌感染", "脱发")) {
             code = "dermatology";
-        } else if (containsAny(normalized, "鍎跨", "灏忓", "瀛╁瓙", "瀹濆疂", "濠村効", "鍎跨", "鐢熼暱鍙戣偛", "鐤嫍", "鍙戣偛杩熺紦")) {
+        } else if (containsAny(normalized, "儿童", "小孩", "孩子", "宝宝", "婴儿", "儿科", "生长发育", "疫苗", "发育迟缓")) {
             code = "pediatrics";
-        } else if (containsAny(normalized, "鍜冲椊", "鍜崇棸", "姘旂煭", "鍠?, "鍠樻伅", "鍛煎惛鍥伴毦", "鑲虹値", "鎱㈤樆鑲?, "鏀皵绠?, "鍝枠")) {
+        } else if (containsAny(normalized, "咳嗽", "咳痰", "气短", "喘", "喘息", "呼吸困难", "肺炎", "慢阻肺", "支气管", "哮喘")) {
             code = "respiratory-medicine";
-        } else if (containsAny(normalized, "鑵圭棝", "鑵规郴", "鑵硅儉", "鍙嶉吀", "鑳冪棝", "鑳冭儉", "鎭跺績", "鍛曞悙", "渚胯", "榛戜究", "娑堝寲涓嶈壇")) {
+        } else if (containsAny(normalized, "腹痛", "腹泻", "腹胀", "反酸", "胃痛", "胃胀", "恶心", "呕吐", "便血", "黑便", "消化不良")) {
             code = "gastroenterology";
-        } else if (containsAny(normalized, "绯栧翱鐥?, "鐢茬姸鑵?, "琛€绯?, "琛€鑴?, "鑲ヨ儢", "澶氶ギ", "澶氬翱", "娑堢槮", "浠ｈ阿", "鍐呭垎娉?)) {
+        } else if (containsAny(normalized, "糖尿病", "甲状腺", "血糖", "血脂", "肥胖", "多饮", "多尿", "消瘦", "代谢", "内分泌")) {
             code = "endocrinology";
-        } else if (containsAny(normalized, "鑰抽福", "鍚姏涓嬮檷", "鑰崇棝", "榧诲", "娴佹稌", "鍜界棝", "澹伴煶鍢跺搼", "鍠夊挋鐥?, "榧荤鐐?, "鎵佹浣?)) {
+        } else if (containsAny(normalized, "耳鸣", "听力下降", "耳痛", "鼻塞", "流涕", "咽痛", "声音嘶哑", "喉咙痛", "鼻窦炎", "扁桃体")) {
             code = "otolaryngology";
-        } else if (containsAny(normalized, "瑙嗗姏涓嬮檷", "瑙嗙墿妯＄硦", "鐪肩孩", "鐪肩棝", "骞茬溂", "娴佹唱", "缁撹啘鐐?, "鐧藉唴闅?, "闈掑厜鐪?)) {
+        } else if (containsAny(normalized, "视力下降", "视物模糊", "眼红", "眼痛", "干眼", "流泪", "结膜炎", "白内障", "青光眼")) {
             code = "ophthalmology";
-        } else if (containsAny(normalized, "灏块", "灏挎€?, "灏跨棝", "琛€灏?, "鎺掑翱", "缁撶煶", "鍓嶅垪鑵?, "鑵伴吀", "鑲剧粸鐥?, "娉屽翱")) {
+        } else if (containsAny(normalized, "尿频", "尿急", "尿痛", "血尿", "排尿", "结石", "前列腺", "腰酸", "肾绞痛", "泌尿")) {
             code = "urology";
-        } else if (containsAny(normalized, "鏈堢粡", "鐧藉甫", "闃撮亾", "鐩嗚厰", "濡囩", "濡婂", "鎬€瀛?, "瀛曚骇", "闃撮亾鍑鸿", "缁忔湡")) {
+        } else if (containsAny(normalized, "月经", "白带", "阴道", "盆腔", "妇科", "妊娠", "怀孕", "孕产", "阴道出血", "经期")) {
             code = "gynecology";
         } else {
             code = "internal-medicine";
@@ -1462,10 +1462,11 @@ public class WorkflowService {
     }
 
     private String buildTriageReason(String complaint, DepartmentEntity department, List<DoctorOption> doctors) {
-        String doctorText = doctors.isEmpty() ? "鏆傛棤鍙帹鑽愬尰鐢燂紝璇锋墜鍔ㄩ€夋嫨鍙锋簮銆? :
-                "鎺ㄨ崘鍖荤敓锛? + doctors.stream().map(DoctorOption::name).collect(Collectors.joining("銆?)) + "銆?;
-        return "鏍规嵁涓昏瘔鈥? + complaint + "鈥濓紝鏈湴鍒嗚瘖瑙勫垯寤鸿浼樺厛鍓嶅線" + department.getName()
-                + "銆傜悊鐢憋細鐥囩姸鍏抽敭璇嶄笌璇ョ瀹ゅ父瑙佸氨璇婅寖鍥村尮閰嶃€? + doctorText;
+        String doctorText = doctors.isEmpty()
+                ? "暂无可推荐医生，请手动选择号源。"
+                : "推荐医生：" + doctors.stream().map(DoctorOption::name).collect(Collectors.joining("、")) + "。";
+        return "根据主诉“" + complaint + "”，本地分诊规则建议优先前往" + department.getName()
+                + "。理由：症状关键词与该科室常见就诊范围匹配。" + doctorText;
     }
 
     private AIModels.AIExecutionOutcome<String> invokeAi(String taskType,
@@ -1521,11 +1522,11 @@ public class WorkflowService {
         return String.join("\n",
                 "chiefComplaint: " + firstNonBlank(chief, firstSentence(conversationText)),
                 "presentIllness: " + firstNonBlank(conversationText, ""),
-                "pastHistory: " + firstNonBlank(patient.getMedicalHistory(), "鏈鐗规畩鏃㈠線鍙?),
-                "physicalExam: 鐢熷懡浣撳緛骞崇ǔ锛屽缓璁尰鐢熺粨鍚堟煡浣撹ˉ鍏呫€?,
+                "pastHistory: " + firstNonBlank(patient.getMedicalHistory(), "未见特殊既往史"),
+                "physicalExam: 生命体征平稳，建议医生结合查体补充。",
                 "preliminaryDiagnosis: " + resolvedDiagnosis,
                 "treatmentPlan: " + buildTreatmentPlan(resolvedDiagnosis),
-                "docNote: 鏈湴瑙勫垯宸茬敓鎴愮梾鍘嗚崏绋匡紝璇峰尰鐢熺‘璁ゃ€?
+                "docNote: 本地规则已生成病历草稿，请医生确认。"
         );
     }
 
@@ -1564,43 +1565,43 @@ public class WorkflowService {
             PrescriptionItemRequest item = items.get(i);
             DrugEntity drug = drugs.get(i);
             if (!seen.add(item.drugId())) {
-                hits.add("閲嶅鐢ㄨ嵂锛? + drug.getName() + " 鍦ㄥ鏂逛腑鍑虹幇澶氭銆?);
+                hits.add("重复用药：" + drug.getName() + " 在处方中出现多次。");
                 risk = maxRisk(risk, "MEDIUM");
             }
             if (patient.getAllergyHistory() != null
-                    && !patient.getAllergyHistory().contains("鏃?)
+                    && !patient.getAllergyHistory().contains("无")
                     && drug.getContraindications() != null
                     && drug.getContraindications().contains(patient.getAllergyHistory())) {
-                hits.add("杩囨晱椋庨櫓锛? + patient.getAllergyHistory() + " 涓?" + drug.getName() + " 绂佸繉淇℃伅鐩稿叧銆?);
+                hits.add("过敏风险：" + patient.getAllergyHistory() + " 与 " + drug.getName() + " 禁忌信息相关。");
                 risk = maxRisk(risk, "HIGH");
             }
             if (item.quantity() != null && item.quantity() > 30) {
-                hits.add("鏁伴噺鍋忛珮锛? + drug.getName() + " 鏁伴噺瓒呰繃 30锛岃纭鐤楃▼銆?);
+                hits.add("数量偏高：" + drug.getName() + " 数量超过 30，请确认疗程。");
                 risk = maxRisk(risk, "MEDIUM");
             }
             if (item.dosage() != null && item.dosage().compareTo(new BigDecimal("2.00")) > 0) {
-                hits.add("鍓傞噺鎻愰啋锛? + drug.getName() + " 鍗曟鍓傞噺杈冮珮锛岃缁撳悎璇存槑涔︺€?);
+                hits.add("剂量提醒：" + drug.getName() + " 单次剂量较高，请结合说明书。");
                 risk = maxRisk(risk, "MEDIUM");
             }
         }
         for (PrescriptionRuleDefinitionEntity rule : ruleRepository.findByStatusOrderByRuleCodeAsc(ACTIVE)) {
             for (DrugEntity drug : drugs) {
                 if (rule.getApplicableDrugs() != null && rule.getApplicableDrugs().contains(drug.getName())) {
-                    hits.add(rule.getAlertMessage() == null ? "鍛戒腑瑙勫垯锛? + rule.getRuleCode() : rule.getAlertMessage());
+                    hits.add(rule.getAlertMessage() == null ? "命中规则：" + rule.getRuleCode() : rule.getAlertMessage());
                     risk = maxRisk(risk, firstNonBlank(rule.getRiskLevel(), "MEDIUM"));
                 }
             }
         }
         if (hits.isEmpty()) {
-            hits.add("鏈懡涓腑楂橀闄╂湰鍦拌鍒欙紝浠嶉渶鍖荤敓缁撳悎鎮ｈ€呮儏鍐电‘璁ゃ€?);
+            hits.add("未命中高风险本地规则，仍需医生结合患者情况确认。");
         }
         String missing = medicalRecordRepository.findFirstByRegistrationIdOrderByVersionDesc(registration.getId()).isPresent()
                 ? ""
-                : "缂哄皯宸蹭繚瀛樼梾鍘嗕笂涓嬫枃";
+                : "缺少已保存病历上下文";
         String summary = switch (risk) {
-            case "HIGH" -> "鏈湴瑙勫垯鍒ゆ柇瀛樺湪楂橀闄╋紝寤鸿璋冩暣澶勬柟鎴栬ˉ鍏呬汉宸ョ‘璁ゃ€?;
-            case "MEDIUM" -> "鏈湴瑙勫垯鍒ゆ柇瀛樺湪涓瓑椋庨櫓锛屽缓璁尰鐢熷鏍稿墏閲忋€佺枟绋嬫垨绂佸繉銆?;
-            default -> "鏈湴瑙勫垯鏈彂鐜版槑鏄鹃闄╋紝寤鸿甯歌澶嶆牳鍚庢彁浜ゃ€?;
+            case "HIGH" -> "本地规则判断存在高风险，建议调整处方或补充人工确认。";
+            case "MEDIUM" -> "本地规则判断存在中等风险，建议医生复核剂量、疗程或禁忌。";
+            default -> "本地规则未发现明显风险，建议常规复核后提交。";
         };
         return new ReviewComputation(risk, String.join("\n", hits), missing, summary, summary);
     }
@@ -1845,17 +1846,17 @@ public class WorkflowService {
 
     private List<String> nextActions(RegistrationEntity registration) {
         if (registration == null || registration.getStatus() == null) {
-            return List.of("绛夊緟鎺ヨ瘖");
+            return List.of("等待接诊");
         }
         return switch (registration.getStatus()) {
-            case WAITING -> List.of("寮€濮嬫帴璇?, "鏌ョ湅鍒嗚瘖寤鸿", "鏌ョ湅鎸傚彿淇℃伅");
-            case IN_CONSULTATION -> List.of("褰曞叆闂瘖", "鐢熸垚鐥呭巻鑽夌", "淇濆瓨姝ｅ紡鐥呭巻");
-            case MEDICAL_RECORD_SAVED -> List.of("寮€绔嬪鏂?, "澶勬柟瀹℃牳", "缁撴潫灏辫瘖");
-            case PRESCRIPTION_REVIEWED -> List.of("鎻愪氦澶勬柟", "鏌ョ湅瀹℃牳缁撴灉", "缁撴潫灏辫瘖");
-            case PRESCRIPTION_SUBMITTED -> List.of("鏌ョ湅宸叉彁浜ゅ鏂?, "缁撴潫灏辫瘖");
-            case COMPLETED -> List.of("鏌ョ湅鍘嗗彶璁板綍", "鎻愪氦鍙嶉");
-            case CANCELLED -> List.of("鏌ョ湅鍙栨秷璁板綍");
-            default -> List.of("鏌ョ湅鎸傚彿璇︽儏");
+            case WAITING -> List.of("开始接诊", "查看分诊建议", "查看挂号信息");
+            case IN_CONSULTATION -> List.of("录入问诊", "生成病历草稿", "保存正式病历");
+            case MEDICAL_RECORD_SAVED -> List.of("开立处方", "处方审核", "结束就诊");
+            case PRESCRIPTION_REVIEWED -> List.of("提交处方", "查看审核结果", "结束就诊");
+            case PRESCRIPTION_SUBMITTED -> List.of("查看已提交处方", "结束就诊");
+            case COMPLETED -> List.of("查看历史记录", "提交反馈");
+            case CANCELLED -> List.of("查看取消记录");
+            default -> List.of("查看挂号详情");
         };
     }
 
@@ -1977,27 +1978,27 @@ public class WorkflowService {
 
     private String buildPatientSummary(RegistrationEntity registration) {
         PatientEntity patient = patientRepository.findById(registration.getPatientId()).orElse(null);
-        String patientName = patient == null ? "鍖垮悕鎮ｈ€? : maskName(patient.getName());
-        return "鎮ｈ€咃細" + patientName
-                + "锛涚瀹わ細" + firstNonBlank(registration.getDepartmentSnapshot(), "鏈垎绉?)
-                + "锛涘尰鐢燂細" + firstNonBlank(registration.getDoctorSnapshot(), "鏈寚瀹?);
+        String patientName = patient == null ? "匿名患者" : maskName(patient.getName());
+        return "患者：" + patientName
+                + "；科室：" + firstNonBlank(registration.getDepartmentSnapshot(), "未分科")
+                + "；医生：" + firstNonBlank(registration.getDoctorSnapshot(), "未指定");
     }
 
     private String buildRiskSummary(PrescriptionReviewEntity review) {
         StringBuilder builder = new StringBuilder();
-        builder.append("椋庨櫓绛夌骇锛?).append(firstNonBlank(review.getRiskLevel(), "UNKNOWN"));
+        builder.append("风险等级：").append(firstNonBlank(review.getRiskLevel(), "UNKNOWN"));
         if (review.getLocalRuleHits() != null && !review.getLocalRuleHits().isBlank()) {
-            builder.append("锛涘懡涓細").append(truncateText(review.getLocalRuleHits(), 120));
+            builder.append("；命中：").append(truncateText(review.getLocalRuleHits(), 120));
         }
         if (review.getLlmSummary() != null && !review.getLlmSummary().isBlank()) {
-            builder.append("锛涘缓璁細").append(truncateText(review.getLlmSummary(), 120));
+            builder.append("；建议：").append(truncateText(review.getLlmSummary(), 120));
         }
         return builder.toString();
     }
 
     private String maskName(String name) {
         if (name == null || name.isBlank()) {
-            return "鍖垮悕鎮ｈ€?;
+            return "匿名患者";
         }
         String normalized = name.trim();
         if (normalized.length() == 1) {
@@ -2168,54 +2169,54 @@ public class WorkflowService {
 
     private String firstSentence(String text) {
         if (text == null || text.isBlank()) {
-            return "涓昏瘔寰呰ˉ鍏?;
+            return "主诉待补充";
         }
         String normalized = text.trim();
         int index = -1;
-        for (String delimiter : List.of("銆?, ".", "\n", "锛?, ";")) {
+        for (String delimiter : List.of("\n", "\r", ".", "。", "?", "？", ";", "；", "!", "！")) {
             int found = normalized.indexOf(delimiter);
             if (found >= 0 && (index < 0 || found < index)) {
                 index = found;
             }
         }
-        return index > 0 ? normalized.substring(0, index + 1) : normalized;
+        return index >= 0 ? normalized.substring(0, index + 1) : normalized;
     }
 
     private String inferDiagnosis(String text) {
         String value = text == null ? "" : text;
-        if (containsAny(value, "鑳?, "蹇冩偢", "姘旂煭", "琛€鍘?)) {
-            return "鑳哥棝寰呮煡锛岄渶鎺掗櫎蹇冭绠＄浉鍏崇柧鐥?;
+        if (containsAny(value, "胸", "心悸", "气短", "血压")) {
+            return "胸痛待查，需排除心血管相关疾病";
         }
-        if (containsAny(value, "鍜?, "鍙戠儹", "鍜?, "鍛煎惛")) {
-            return "涓婂懠鍚搁亾鎰熸煋鍙兘";
+        if (containsAny(value, "咳", "发热", "咽", "呼吸")) {
+            return "上呼吸道感染可能";
         }
-        if (containsAny(value, "鑳?, "鑵?, "鎭跺績", "鑵规郴")) {
-            return "鑳冭偁鍔熻兘绱婁贡鍙兘";
+        if (containsAny(value, "胃", "腹", "恶心", "腹泻")) {
+            return "胃肠功能紊乱可能";
         }
-        return "甯歌鍐呯涓嶉€傦紝闇€缁撳悎鏌ヤ綋杩涗竴姝ユ槑纭?;
+        return "常见内科不适，需结合查体进一步明确";
     }
 
     private String buildTreatmentPlan(String diagnosis) {
-        if (diagnosis.contains("蹇?)) {
-            return "寤鸿瀹屽杽蹇冪數鍥俱€佸績鑲岄叾鍜岃鍘嬬洃娴嬶紱濡傜棁鐘跺姞閲嶅強鏃舵€ヨ瘖銆?;
+        if (diagnosis.contains("心")) {
+            return "建议完善心电图、心肌酶和血压监测；如症状加重及时急诊。";
         }
-        if (diagnosis.contains("鍛煎惛")) {
-            return "寤鸿浼戞伅銆佽ˉ娑诧紝蹇呰鏃跺畬鍠勮甯歌鍜岃兏閮ㄥ奖鍍忔鏌ャ€?;
+        if (diagnosis.contains("呼吸")) {
+            return "建议休息、补液，必要时完善血常规和胸部影像检查。";
         }
-        return "寤鸿瀹屽杽鍩虹妫€鏌ワ紝缁撳悎鐥囩姸缁欎簣瀵圭棁澶勭悊骞跺璇娿€?;
+        return "建议完善基础检查，结合症状给予对症处理并复诊。";
     }
 
     private String suggestExamItems(String diagnosis) {
-        if (diagnosis.contains("蹇?)) {
-            return "蹇冪數鍥俱€佸績鑲岄叾璋便€佽鍘嬬洃娴嬨€佸繀瑕佹椂蹇冭剰褰╄秴";
+        if (diagnosis.contains("心")) {
+            return "心电图、心肌酶谱、血压监测、必要时心脏彩超";
         }
-        if (diagnosis.contains("鍛煎惛")) {
-            return "琛€甯歌銆丆 鍙嶅簲铔嬬櫧銆佽兏閮ㄥ奖鍍?;
+        if (diagnosis.contains("呼吸")) {
+            return "血常规、C 反应蛋白、胸部影像";
         }
-        if (diagnosis.contains("鑳?) || diagnosis.contains("鑲?)) {
-            return "鑵归儴鏌ヤ綋銆佷究甯歌銆佸繀瑕佹椂鑵归儴瓒呭０";
+        if (diagnosis.contains("胃") || diagnosis.contains("肠")) {
+            return "腹部查体、便常规、必要时腹部超声";
         }
-        return "琛€甯歌銆佸翱甯歌銆佸熀纭€鐢熷寲";
+        return "血常规、尿常规、基础生化";
     }
 
     private String hashItems(List<PrescriptionItemRequest> items) {
