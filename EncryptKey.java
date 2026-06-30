@@ -11,8 +11,11 @@ public class EncryptKey {
     private static final int GCM_IV_BYTES = 12;
 
     public static void main(String[] args) throws Exception {
-        String secret = "cloud-brain-medical-dev-secret-change-me";
-        String apiKey = "sk-9d84627a67084a05a4c505afc56fe75e8";
+        String secret = System.getenv().getOrDefault("CONFIG_SECRET", "cloud-brain-medical-dev-secret-change-me");
+        String apiKey = System.getenv("AI_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("Set AI_API_KEY before running this helper.");
+        }
 
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] keyBytes = digest.digest(secret.getBytes(StandardCharsets.UTF_8));

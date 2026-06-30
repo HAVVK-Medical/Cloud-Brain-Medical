@@ -85,11 +85,5 @@ export const useNotificationStore = defineStore('notification', () => {
     socketState.value = 'idle';
   }
 
-  function disconnect() {
-    socket?.close();
-    socket = null;
-    socketState.value = 'idle';
-  }
-
   return { notifications, loading, socketState, unreadCount, connected, load, ack, connect, disconnect };
 });

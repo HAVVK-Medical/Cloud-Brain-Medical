@@ -101,7 +101,6 @@ const confirmOpen = ref(false);
 const confirmTitle = ref('');
 const confirmMessage = ref('');
 const confirmAction = ref<(() => void) | null>(null);
-const confirmLoading = ref(false);
 const dashboard = ref<DashboardOverview | null>(null);
 const dashboardTrends = ref<DashboardTrendPoint[]>([]);
 const aiUsage = ref<AiUsageStats | null>(null);

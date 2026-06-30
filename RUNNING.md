@@ -29,6 +29,28 @@ $env:DB_PASSWORD="cloudbrain_dev"
 
 Flyway runs the database migrations automatically when the backend starts.
 
+Backend with KingbaseES:
+```powershell
+# After installing KingbaseES, create the project database/user once:
+.\init-kingbase.ps1 -KsqlPath "C:\path\to\Kingbase\Server\bin\ksql.exe"
+
+# Start backend with the kingbase profile:
+.\start-backend-kingbase.ps1
+```
+
+Default Kingbase connection settings:
+```powershell
+$env:SPRING_PROFILES_ACTIVE="kingbase"
+$env:DB_URL="jdbc:postgresql://127.0.0.1:54321/cloudbrain_medical?currentSchema=public"
+$env:DB_USERNAME="cloudbrain"
+$env:DB_PASSWORD="cloudbrain_dev"
+.\mvnw.cmd -pl backend spring-boot:run
+```
+
+The `kingbase` profile uses the Kingbase PostgreSQL-compatible JDBC driver and
+`classpath:db/kingbase/migration` Flyway scripts. MySQL and H2 continue to use
+the existing migration directory.
+
 Backend with default in-memory H2:
 ```powershell
 .\mvnw.cmd -pl backend test
