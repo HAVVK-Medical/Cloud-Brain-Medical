@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,6 +97,18 @@ class ChatServiceTest {
     }
 
     @Test
+    void createSessionAllowsNullOrBlankFirstMessageWithoutPersistingMessage() {
+        when(sessionRepository.save(any(ChatSessionEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ChatSessionEntity withoutMessage = service.createSession(10L, "PATIENT", null);
+        ChatSessionEntity blankMessage = service.createSession(10L, "PATIENT", "   ");
+
+        assertThat(withoutMessage.getTitle()).isNull();
+        assertThat(blankMessage.getTitle()).isBlank();
+        verify(messageRepository, never()).save(any(ChatMessageEntity.class));
+    }
+
+    @Test
     void deleteSessionRemovesMessagesAndOwnedSession() {
         service.deleteSession(12L, 10L);
 
@@ -139,6 +152,72 @@ class ChatServiceTest {
         assertThatThrownBy(() -> service.streamChat(5L, 10L, "hi", "PATIENT"))
                 .isInstanceOf(ApiException.class)
                 .hasMessage("Access denied");
+    }
+
+    @Test
+    void streamChatFallbackPersistsAssistantMessageWhenConfigCannotAuthenticate() throws Exception {
+        ChatSessionEntity session = session(13L, 10L, "PATIENT", null);
+        CountDownLatch assistantSaved = new CountDownLatch(1);
+        List<ChatMessageEntity> savedMessages = new ArrayList<>();
+        when(sessionRepository.findById(13L)).thenReturn(Optional.of(session));
+        when(messageRepository.findBySessionIdOrderByCreatedAtAsc(13L)).thenReturn(List.of());
+        when(messageRepository.save(any(ChatMessageEntity.class))).thenAnswer(invocation -> {
+            ChatMessageEntity entity = invocation.getArgument(0);
+            savedMessages.add(entity);
+            if ("ASSISTANT".equals(entity.getRole())) {
+                entity.setId(1302L);
+                assistantSaved.countDown();
+            }
+            return entity;
+        });
+        when(sessionRepository.save(any(ChatSessionEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(configResolver.resolve("CHAT")).thenReturn(new AIModels.ResolvedAIConfig(
+                1L, " ", "model", "https://api", " ", "kv1", "CHAT", 15, "cfg-v1"));
+        when(promptTemplateService.resolve(eq("CHAT"), eq(null), any()))
+                .thenReturn(new AIModels.ResolvedPromptTemplate("tpl", "CHAT", null, "system", 1, "tpl-v1"));
+
+        service.streamChat(13L, 10L, "hello", "PATIENT");
+
+        assertThat(assistantSaved.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(savedMessages).anySatisfy(message -> {
+            assertThat(message.getRole()).isEqualTo("ASSISTANT");
+            assertThat(message.getContent()).contains("AI");
+            assertThat(message.getAiMeta()).contains("\"provider\":\"AI\"");
+        });
+        assertThat(session.getTitle()).isNotBlank();
+    }
+
+    @Test
+    void streamChatPersistsErrorMessageWhenProviderFails() throws Exception {
+        ChatSessionEntity session = session(14L, 10L, "PATIENT", "old");
+        CountDownLatch errorSaved = new CountDownLatch(1);
+        List<ChatMessageEntity> savedMessages = new ArrayList<>();
+        when(sessionRepository.findById(14L)).thenReturn(Optional.of(session));
+        when(messageRepository.findBySessionIdOrderByCreatedAtAsc(14L)).thenReturn(List.of());
+        when(messageRepository.save(any(ChatMessageEntity.class))).thenAnswer(invocation -> {
+            ChatMessageEntity entity = invocation.getArgument(0);
+            savedMessages.add(entity);
+            if ("ASSISTANT".equals(entity.getRole())) {
+                errorSaved.countDown();
+            }
+            return entity;
+        });
+        when(configResolver.resolve("CHAT")).thenReturn(new AIModels.ResolvedAIConfig(
+                1L, "mock", "model", "https://api", "secret", "kv1", "CHAT", 15, "cfg-v1"));
+        when(promptTemplateService.resolve(eq("CHAT"), eq(null), any()))
+                .thenReturn(new AIModels.ResolvedPromptTemplate("tpl", "CHAT", null, "system", 1, "tpl-v1"));
+        AIProvider provider = org.mockito.Mockito.mock(AIProvider.class);
+        when(providerResolver.resolve("mock")).thenReturn(provider);
+        when(provider.chatStream(any(AIModels.AIChatRequest.class), any(), any()))
+                .thenThrow(new IllegalStateException("provider down"));
+
+        service.streamChat(14L, 10L, "hello", "PATIENT");
+
+        assertThat(errorSaved.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(savedMessages).anySatisfy(message -> {
+            assertThat(message.getRole()).isEqualTo("ASSISTANT");
+            assertThat(message.getContent()).contains("AI");
+        });
     }
 
     @Test

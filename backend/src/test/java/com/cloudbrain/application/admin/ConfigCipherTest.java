@@ -3,6 +3,8 @@ package com.cloudbrain.application.admin;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Field;
+import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
 
 class ConfigCipherTest {
@@ -41,5 +43,27 @@ class ConfigCipherTest {
         assertThatThrownBy(() -> cipher.decrypt("not-base64"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("unable to decrypt secret");
+    }
+
+    @Test
+    void decryptRejectsPayloadWithoutCipherText() {
+        ConfigCipher cipher = new ConfigCipher("unit-test-secret");
+        String ivOnly = java.util.Base64.getEncoder().encodeToString(new byte[12]);
+
+        assertThatThrownBy(() -> cipher.decrypt(ivOnly))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("unable to decrypt secret");
+    }
+
+    @Test
+    void encryptWrapsCipherInitializationFailures() throws Exception {
+        ConfigCipher cipher = new ConfigCipher("unit-test-secret");
+        Field field = ConfigCipher.class.getDeclaredField("keySpec");
+        field.setAccessible(true);
+        field.set(cipher, new SecretKeySpec(new byte[1], "AES"));
+
+        assertThatThrownBy(() -> cipher.encrypt("secret"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("unable to encrypt secret");
     }
 }

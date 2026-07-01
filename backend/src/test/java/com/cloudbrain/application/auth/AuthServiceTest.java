@@ -21,6 +21,7 @@ import com.cloudbrain.repository.SessionTokenJpaRepository;
 import com.cloudbrain.security.ActorRole;
 import com.cloudbrain.security.JwtTokenUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -149,6 +150,33 @@ class AuthServiceTest {
     }
 
     @Test
+    void refreshRevokesSessionWhenRefreshExpiryIsMissing() {
+        SessionTokenEntity session = activeSession();
+        session.setRefreshExpiresAt(null);
+        when(sessionTokenRepository.findByRefreshHashAndStatus(jwtTokenUtil.hashToken("missing-expiry"), "ACTIVE"))
+                .thenReturn(Optional.of(session));
+
+        assertThatThrownBy(() -> authService.refresh(new RefreshRequest("missing-expiry")))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("login expired please re-login");
+
+        assertThat(session.getStatus()).isEqualTo("REVOKED");
+        assertThat(session.getLogoutReason()).isEqualTo("refresh token expired");
+    }
+
+    @Test
+    void refreshAndLogoutRejectUnknownRefreshToken() {
+        when(sessionTokenRepository.findByRefreshHashAndStatus(any(), eq("ACTIVE"))).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.refresh(new RefreshRequest("unknown")))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("login expired please re-login");
+        assertThatThrownBy(() -> authService.logout(new LogoutRequest("unknown", null)))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("login expired please re-login");
+    }
+
+    @Test
     void refreshAuditsAndRejectsWhenAccountNoLongerExists() {
         SessionTokenEntity session = activeSession();
         when(sessionTokenRepository.findByRefreshHashAndStatus(jwtTokenUtil.hashToken("refresh-old"), "ACTIVE"))
@@ -189,6 +217,40 @@ class AuthServiceTest {
 
         assertThat(session.getStatus()).isEqualTo("REVOKED");
         assertThat(session.getLogoutReason()).isEqualTo("logout");
+    }
+
+    @Test
+    void logoutUsesDefaultReasonWhenReasonIsNull() {
+        SessionTokenEntity session = activeSession();
+        when(sessionTokenRepository.findByRefreshHashAndStatus(jwtTokenUtil.hashToken("refresh-old"), "ACTIVE"))
+                .thenReturn(Optional.of(session));
+
+        authService.logout(new LogoutRequest("refresh-old", null));
+
+        assertThat(session.getStatus()).isEqualTo("REVOKED");
+        assertThat(session.getLogoutReason()).isEqualTo("logout");
+    }
+
+    @Test
+    void recordAuditConvenienceOverloadPersistsBasicAuditLog() throws Exception {
+        Method method = AuthService.class.getDeclaredMethod(
+                "recordAudit",
+                Long.class,
+                String.class,
+                String.class,
+                boolean.class,
+                String.class
+        );
+        method.setAccessible(true);
+
+        method.invoke(authService, 99L, "ADMIN", "MANUAL", true, "ok");
+
+        ArgumentCaptor<AuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AuditLogEntity.class);
+        verify(auditLogRepository).save(auditCaptor.capture());
+        assertThat(auditCaptor.getValue().getActorId()).isEqualTo(99L);
+        assertThat(auditCaptor.getValue().getActorRole()).isEqualTo("ADMIN");
+        assertThat(auditCaptor.getValue().getAction()).isEqualTo("MANUAL");
+        assertThat(auditCaptor.getValue().getMessage()).isEqualTo("ok");
     }
 
     private AccountProfile account(Long userId, ActorRole role, Long patientId, Long doctorId) {

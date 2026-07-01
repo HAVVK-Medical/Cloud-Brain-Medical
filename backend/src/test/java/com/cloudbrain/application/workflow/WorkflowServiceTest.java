@@ -63,11 +63,14 @@ import com.cloudbrain.repository.TriageAccuracyFeedbackJpaRepository;
 import com.cloudbrain.repository.TriageRecordJpaRepository;
 import com.cloudbrain.security.ActorContext;
 import com.cloudbrain.security.ActorRole;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -681,6 +684,307 @@ class WorkflowServiceTest {
                 .hasMessage("date range cannot exceed 60 days");
     }
 
+    @Test
+    void additionalPermissionAndLookupBranchesCoverCoreReadFailures() {
+        DoctorEntity doctorWithoutDepartment = doctor(12L, "nodept", "No Dept", null, "ACTIVE");
+        when(doctors.findByIdAndStatus(12L, "ACTIVE")).thenReturn(Optional.of(doctorWithoutDepartment));
+        assertThat(service.getDoctor(12L).departmentName()).isNull();
+
+        when(doctors.findByIdAndStatus(404L, "ACTIVE")).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.getDoctor(404L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("doctor not found");
+
+        when(departments.findById(404L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.getDepartment(404L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("department not found");
+
+        RegistrationEntity registration = registration(120L, 100L, 10L, 1L, 20L, "MEDICAL_RECORD_SAVED");
+        MedicalRecordEntity record = medicalRecord(121L, 120L, 100L, 10L, "pain", "cold");
+        when(registrations.findByIdAndDoctorId(120L, 10L)).thenReturn(Optional.of(registration));
+        when(medicalRecords.findById(121L)).thenReturn(Optional.of(record));
+        when(medicalRecords.findByPatientIdOrderByCreatedAtDesc(100L)).thenReturn(List.of(record));
+
+        assertThat(service.listMedicalRecordsForPatient(adminActor(), 100L)).hasSize(1);
+        assertThat(service.listMedicalRecordsForPatient(patientActor(), 100L)).hasSize(1);
+        assertThatThrownBy(() -> service.listMedicalRecordsForPatient(
+                new ActorContext(9L, ActorRole.PATIENT, 999L, null, "other", "Other"), 100L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("medical record permission required");
+        assertThat(service.getMedicalRecord(doctorActor(), 121L).id()).isEqualTo(121L);
+        assertThatThrownBy(() -> service.getMedicalRecord(
+                new ActorContext(9L, ActorRole.DOCTOR, null, 999L, "other", "Other"), 121L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("medical record permission required");
+
+        when(registrations.findByIdAndDoctorId(999L, 10L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.startConsultation(doctorActor(), 999L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("registration not found");
+
+        assertThatThrownBy(() -> service.listPatientRegistrations(adminActor()))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("patient permission required");
+        assertThatThrownBy(() -> service.listDoctorQueue(patientActor()))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("doctor permission required");
+        assertThatThrownBy(() -> service.dashboardAiUsage(patientActor(), null))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("dashboard permission required");
+    }
+
+    @Test
+    void aiAttachmentsAndFallbackBranchesCoverGeneratedContentPaths() {
+        RegistrationEntity registration = registration(130L, 100L, 10L, 1L, 20L, "IN_CONSULTATION");
+        registration.setDepartmentId(null);
+        PatientEntity patient = patient(100L, "Bob", 8);
+        patient.setMedicalHistory(null);
+        patient.setAllergyHistory(null);
+        when(registrations.findByIdAndDoctorId(130L, 10L)).thenReturn(Optional.of(registration));
+        when(patients.findById(100L)).thenReturn(Optional.of(patient));
+        when(ai.chat(eq("MEDICAL_RECORD"), eq(null), any(), any(), any(), eq(true), any(), any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Consumer<String> chunk = invocation.getArgument(6);
+                    @SuppressWarnings("unchecked")
+                    java.util.function.Consumer<String> thinking = invocation.getArgument(7);
+                    chunk.accept("draft");
+                    thinking.accept("thinking");
+                    return outcome("MEDICAL_RECORD", "chiefComplaint: \npreliminaryDiagnosis: ");
+                });
+        when(aiCalls.save(any(AICallRecordEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 131L));
+        when(medicalRecords.save(any(MedicalRecordEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 132L));
+
+        List<AiContentAttachment> attachments = List.of(
+                new AiContentAttachment(null, null, null, null, null, null),
+                new AiContentAttachment("video", "https://example.test/v.mp4", null, null, null, null),
+                new AiContentAttachment("audio", null, "base64", null, null, null),
+                new AiContentAttachment("file", "https://example.test/file.pdf", null, "file.pdf", "application/pdf", null),
+                new AiContentAttachment("custom", null, null, "note.txt", null, null)
+        );
+
+        var generated = service.generateMedicalRecord(doctorActor(),
+                new MedicalRecordGenerateRequest(130L, "   ", "", attachments),
+                text -> assertThat(text).isEqualTo("draft"),
+                text -> assertThat(text).isEqualTo("thinking"));
+
+        assertThat(generated.id()).isEqualTo(132L);
+        assertThat(generated.chiefComplaint()).isNotBlank();
+        assertThat(generated.preliminaryDiagnosis()).isNotBlank();
+        assertThat(generated.degraded()).isFalse();
+    }
+
+    @Test
+    void prescriptionReviewCoversContextMissingMediumRiskAndValidationFailures() {
+        RegistrationEntity registration = registration(140L, 100L, 10L, 1L, 20L, "MEDICAL_RECORD_SAVED");
+        PatientEntity patient = patient(100L, "Medium Risk", 30);
+        DrugEntity drug = drug(30L, "D001", "Aspirin", "ASP", "ACTIVE");
+        PrescriptionRuleDefinitionEntity noCondition = prescriptionRule(901L, "NO_CONDITION", "CUSTOM", "", "", "", "", "LOW");
+        PrescriptionRuleDefinitionEntity diseaseMiss = prescriptionRule(902L, "DISEASE_MISS", "CUSTOM", "Aspirin", "diabetes", "", "", "MEDIUM");
+        PrescriptionRuleDefinitionEntity populationMiss = prescriptionRule(903L, "POP_MISS", "CUSTOM", "Aspirin", "", "elderly", "", "MEDIUM");
+        PrescriptionRuleDefinitionEntity badQuantity = prescriptionRule(904L, "BAD_QTY", "CUSTOM", "Aspirin", "", "", "quantity>bad", "MEDIUM");
+        PrescriptionRuleDefinitionEntity badDosage = prescriptionRule(905L, "BAD_DOSAGE", "CUSTOM", "Aspirin", "", "", "dosage>bad", "MEDIUM");
+        PrescriptionRuleDefinitionEntity frequencyRule = prescriptionRule(906L, "FREQ", "CUSTOM", "Aspirin", "", "", "frequency>3", "MEDIUM");
+
+        when(registrations.findByIdAndDoctorId(140L, 10L)).thenReturn(Optional.of(registration));
+        when(patients.findById(100L)).thenReturn(Optional.of(patient));
+        when(departments.findById(1L)).thenReturn(Optional.of(department(1L, "internal-medicine", "Internal", "ACTIVE")));
+        when(medicalRecords.findFirstByRegistrationIdOrderByVersionDesc(140L)).thenReturn(Optional.empty());
+        when(drugs.findByIdAndStatus(30L, "ACTIVE")).thenReturn(Optional.of(drug));
+        when(rules.findByStatusOrderByRuleCodeAsc("ACTIVE"))
+                .thenReturn(List.of(noCondition, diseaseMiss, populationMiss, badQuantity, badDosage, frequencyRule));
+        when(ai.chat(eq("PRESCRIPTION_REVIEW"), eq("internal-medicine"), any(), any(), any(), eq(true), any(), any()))
+                .thenReturn(outcome("PRESCRIPTION_REVIEW", "llmSuggestion: manual\nllmSummary: medium"));
+        when(aiCalls.save(any(AICallRecordEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 141L));
+        when(prescriptionReviews.save(any(PrescriptionReviewEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 142L));
+        when(notifications.findFirstByRecipientIdAndRecipientRoleAndAlertTypeAndBusinessRecordIdAndReadFalseOrderByCreatedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(notifications.save(any(NotificationRecordEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 143L));
+        when(registrations.save(any(RegistrationEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var review = service.reviewPrescription(doctorActor(),
+                new PrescriptionReviewRequest(140L,
+                        List.of(new PrescriptionItemRequest(30L, new BigDecimal("1.00"), "tid", "3 days", 1, "take with food")),
+                        List.of(new AiContentAttachment("text", null, "note", null, null, null))),
+                text -> assertThat(text).isNotNull());
+
+        assertThat(review.riskLevel()).isEqualTo("MEDIUM");
+        assertThat(review.ruleEngineStatus()).isEqualTo("CONTEXT_MISSING");
+        assertThat(review.contextMissingItemList()).isNotEmpty();
+        assertThat(review.ruleHits()).extracting("ruleCode").contains("FREQ");
+        verify(ws).publish(any());
+
+        RegistrationEntity waiting = registration(141L, 100L, 10L, 1L, 20L, "WAITING");
+        when(registrations.findByIdAndDoctorId(141L, 10L)).thenReturn(Optional.of(waiting));
+        assertThatThrownBy(() -> service.reviewPrescription(doctorActor(),
+                new PrescriptionReviewRequest(141L, List.of(new PrescriptionItemRequest(30L, new BigDecimal("1.00"), "bid", "3 days", 1, "")))))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("please save medical record before prescription review");
+
+        when(registrations.findByIdAndDoctorId(142L, 10L)).thenReturn(Optional.of(registration(142L, 100L, 10L, 1L, 20L, "MEDICAL_RECORD_SAVED")));
+        assertThatThrownBy(() -> service.reviewPrescription(doctorActor(), new PrescriptionReviewRequest(142L, List.of())))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("please add at least one prescription item before review or submit");
+
+        assertThatThrownBy(() -> service.reviewPrescription(doctorActor(), new PrescriptionReviewRequest(142L,
+                List.of(new PrescriptionItemRequest(999L, new BigDecimal("1.00"), "bid", "3 days", 1, "")))))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("drug not found: 999");
+    }
+
+    @Test
+    void responseMappingBranchesCoverDegradedReviewsNotificationsAndNextActions() {
+        RegistrationEntity registration = registration(150L, 100L, 10L, 1L, 20L, "PRESCRIPTION_REVIEWED");
+        PrescriptionReviewEntity review = reviewEntity(151L, 150L, 100L, 10L, "hash", "ctx");
+        review.setPrescriptionId(152L);
+        review.setRiskLevel("");
+        review.setLocalRuleHits("[HIGH] high risk line\n[MEDIUM] medium duplicate line");
+        review.setRuleEngineStatus("COMPLETED");
+        review.setContextMissingItems("missing allergy\nmissing renal");
+        review.setLlmCallStatus("REMOTE");
+        review.setAiCallRecordId(153L);
+        PrescriptionEntity prescription = prescription(152L, 150L, 100L, 10L, 151L, "");
+        AICallRecordEntity degradedCall = aiCall("PRESCRIPTION_REVIEW", 151L, 2L, "DOCTOR", true, 10L);
+
+        when(prescriptions.findById(152L)).thenReturn(Optional.of(prescription));
+        when(prescriptionReviews.findById(151L)).thenReturn(Optional.of(review));
+        when(prescriptionReviews.findByPrescriptionIdOrderByCreatedAtDesc(152L)).thenReturn(List.of(review));
+        when(aiCalls.findById(153L)).thenReturn(Optional.of(degradedCall));
+        when(prescriptionItems.findByPrescriptionIdOrderByCreatedAtAsc(152L)).thenReturn(List.of());
+        when(registrations.findById(150L)).thenReturn(Optional.of(registration));
+        when(patients.findById(100L)).thenReturn(Optional.of(patient(100L, "", 40)));
+        when(doctors.findById(10L)).thenReturn(Optional.of(doctor(10L, "doctor", "Doctor", 1L, "ACTIVE")));
+        when(departments.findById(1L)).thenReturn(Optional.of(department(1L, "internal", "Internal", "ACTIVE")));
+
+        var response = service.getPrescriptionReview(adminActor(), 152L);
+
+        assertThat(response.degraded()).isTrue();
+        assertThat(response.riskLevel()).isBlank();
+        assertThat(response.ruleEngineStatus()).isEqualTo("SUCCESS");
+        assertThat(response.contextMissingItemList()).contains("missing allergy", "missing renal");
+        assertThat(response.ruleHits()).extracting("riskLevel").contains("HIGH", "MEDIUM");
+        assertThat(service.getPrescription(adminActor(), 152L).review().reviewStatus()).isEqualTo("REVIEWED");
+
+        NotificationRecordEntity unread = notification(160L, 100L, "PATIENT", "FOLLOW_UP", true);
+        when(notifications.findById(160L)).thenReturn(Optional.of(unread));
+        assertThat(service.markNotificationRead(patientActor(), 160L).read()).isTrue();
+
+        for (String status : List.of("WAITING", "IN_CONSULTATION", "PRESCRIPTION_REVIEWED", "PRESCRIPTION_SUBMITTED", "COMPLETED", "CANCELLED", "OTHER")) {
+            registration.setStatus(status);
+            assertThat(service.getPrescription(adminActor(), 152L).review()).isNotNull();
+        }
+    }
+
+    @Test
+    void helperBranchesCoverBusinessRuleFallbacksAndBoundaryValues() throws Exception {
+        DepartmentEntity internal = department(1L, "internal-medicine", "Internal", "ACTIVE");
+        DepartmentEntity cardiology = department(2L, "cardiology", "Cardiology", "ACTIVE");
+        DepartmentEntity inactive = department(3L, "inactive", "Inactive", "INACTIVE");
+        when(departments.findByCode("internal-medicine")).thenReturn(Optional.of(internal));
+        when(departments.findByCode("inactive")).thenReturn(Optional.of(inactive));
+        when(departments.findByStatusOrderByNameAsc("ACTIVE")).thenReturn(List.of(internal, cardiology));
+        when(ai.chat(eq("TASK"), eq(null), any(), any(), eq("fallback"), eq(false), any(), any()))
+                .thenReturn(outcome("TASK", "ok"));
+
+        DepartmentEntity picked = invokePrivate("pickDepartment", new Class<?>[]{String.class}, (Object) null);
+        Optional<DepartmentEntity> codeMissNameExact = invokePrivate(
+                "resolveActiveDepartment",
+                new Class<?>[]{String.class, String.class},
+                "inactive",
+                "cardiology"
+        );
+        Optional<DepartmentEntity> containsName = invokePrivate(
+                "resolveActiveDepartment",
+                new Class<?>[]{String.class, String.class},
+                null,
+                "go to Internal clinic"
+        );
+        String reason = invokePrivate("buildTriageReason",
+                new Class<?>[]{String.class, DepartmentEntity.class, List.class}, "symptom", internal, List.of());
+        AIModels.AIExecutionOutcome<String> aiOutcome = invokePrivate(
+                "invokeAi",
+                new Class<?>[]{String.class, String.class, Map.class, List.class, String.class, boolean.class, java.util.function.Consumer.class},
+                "TASK", null, Map.of(), null, "fallback", false, null);
+        AIModels.AIContentPart nullPart = invokePrivate("toContentPart", new Class<?>[]{AiContentAttachment.class}, (Object) null);
+
+        assertThat(picked.getCode()).isEqualTo("internal-medicine");
+        assertThat(codeMissNameExact).contains(cardiology);
+        assertThat(containsName).contains(internal);
+        assertThat(reason).isNotBlank();
+        assertThat(aiOutcome.result()).isEqualTo("ok");
+        assertThat(nullPart.type()).isEqualTo("text");
+        String nullDepartmentName = invokePrivate("departmentNameByRegistration", new Class<?>[]{RegistrationEntity.class}, (Object) null);
+        String nullDepartmentCode = invokePrivate("departmentCodeByRegistration", new Class<?>[]{RegistrationEntity.class}, (Object) null);
+        assertThat(nullDepartmentName).isNull();
+        assertThat(nullDepartmentCode).isNull();
+
+        PrescriptionItemRequest item = new PrescriptionItemRequest(30L, new BigDecimal("1.25"), "custom schedule", "after breakfast", 2, "with food");
+        List<String> noTerms = invokePrivate("splitTerms", new Class<?>[]{String.class}, (Object) null);
+        assertThat(noTerms).isEmpty();
+        assertThat((Boolean) invokePrivate("matchesConditionExpression",
+                new Class<?>[]{String.class, PrescriptionItemRequest.class, String.class}, "", item, "diagnosis")).isTrue();
+        assertThat((Boolean) invokePrivate("matchesConditionExpression",
+                new Class<?>[]{String.class, PrescriptionItemRequest.class, String.class}, "dosage>1.00", item, "diagnosis")).isTrue();
+        assertThat((Boolean) invokePrivate("matchesConditionExpression",
+                new Class<?>[]{String.class, PrescriptionItemRequest.class, String.class}, "food", item, "diagnosis")).isTrue();
+        assertThat((Boolean) invokePrivate("isHighFrequency", new Class<?>[]{String.class}, (Object) null)).isFalse();
+        assertThat((Integer) invokePrivate("riskRank", new Class<?>[]{String.class}, "OTHER")).isZero();
+
+        PrescriptionReviewEntity degraded = reviewEntity(201L, 200L, 100L, 10L, "hash", "ctx");
+        degraded.setLlmCallStatus("DEGRADED");
+        PrescriptionReviewEntity noCall = reviewEntity(202L, 200L, 100L, 10L, "hash", "ctx");
+        noCall.setAiCallRecordId(999L);
+        when(aiCalls.findById(999L)).thenReturn(Optional.empty());
+
+        List<?> emptyRuleHits = invokePrivate("ruleHitsFromReview", new Class<?>[]{PrescriptionReviewEntity.class}, (Object) null);
+        assertThat(emptyRuleHits).isEmpty();
+        assertThat((Boolean) invokePrivate("reviewDegraded", new Class<?>[]{PrescriptionReviewEntity.class}, (Object) null)).isFalse();
+        assertThat((Boolean) invokePrivate("reviewDegraded", new Class<?>[]{PrescriptionReviewEntity.class}, degraded)).isTrue();
+        assertThat((Boolean) invokePrivate("reviewDegraded", new Class<?>[]{PrescriptionReviewEntity.class}, noCall)).isFalse();
+        List<?> noPrescriptionItems = invokePrivate("prescriptionItemsFor", new Class<?>[]{Long.class}, (Object) null);
+        List<String> fallbackNextActions = invokePrivate("nextActions", new Class<?>[]{RegistrationEntity.class}, (Object) null);
+        assertThat(noPrescriptionItems).isEmpty();
+        assertThat(fallbackNextActions).isNotEmpty();
+        assertThat((Boolean) invokePrivate("isSameDay",
+                new Class<?>[]{Instant.class, LocalDateTime.class, LocalDateTime.class}, null, LocalDateTime.now(), LocalDateTime.now().plusDays(1))).isFalse();
+
+        PrescriptionReviewEntity manual = reviewEntity(203L, 200L, 100L, 10L, "hash", "ctx");
+        manual.setRiskLevel("LOW");
+        manual.setManualConfirmation("doctor confirmed");
+        assertThat((Boolean) invokePrivate("requiresManualReview", new Class<?>[]{PrescriptionReviewEntity.class}, (Object) null)).isFalse();
+        assertThat((Boolean) invokePrivate("requiresManualReview", new Class<?>[]{PrescriptionReviewEntity.class}, manual)).isTrue();
+        assertThat((Boolean) invokePrivate("containsNormalized", new Class<?>[]{String.class, String.class}, null, "x")).isFalse();
+        String successStatus = invokePrivate("normalizeRuleEngineStatus", new Class<?>[]{String.class, String.class}, null, "");
+        String missingStatus = invokePrivate("normalizeRuleEngineStatus", new Class<?>[]{String.class, String.class}, null, "missing");
+        String noAlertType = invokePrivate("determineNotificationAlertType", new Class<?>[]{PrescriptionReviewEntity.class}, (Object) null);
+        String defaultDisplayLevel = invokePrivate("determineNotificationDisplayLevel", new Class<?>[]{PrescriptionReviewEntity.class}, reviewEntity(204L, 200L, 100L, 10L, "hash", "ctx"));
+        String nullMaskName = invokePrivate("maskName", new Class<?>[]{String.class}, (Object) null);
+        String singleMaskName = invokePrivate("maskName", new Class<?>[]{String.class}, "A");
+        String truncatedNull = invokePrivate("truncateText", new Class<?>[]{String.class, int.class}, null, 5);
+        assertThat(successStatus).isEqualTo("SUCCESS");
+        assertThat(missingStatus).isEqualTo("CONTEXT_MISSING");
+        assertThat(noAlertType).isNull();
+        assertThat(defaultDisplayLevel).isEqualTo("MEDIUM");
+        assertThat(nullMaskName).isNotNull();
+        assertThat(singleMaskName).isEqualTo("A*");
+        assertThat(truncatedNull).isEqualTo("");
+        assertThat((Boolean) invokePrivate("canViewNotification",
+                new Class<?>[]{ActorContext.class, NotificationRecordEntity.class}, null, notification(210L, 10L, "DOCTOR", "ALERT", false))).isFalse();
+        assertThat((Boolean) invokePrivate("canViewNotification",
+                new Class<?>[]{ActorContext.class, NotificationRecordEntity.class}, adminActor(), notification(211L, 10L, "DOCTOR", "ALERT", false))).isTrue();
+
+        when(diagnosisSuggestions.findById(404L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> invokePrivate("requireDoctorDiagnosisSuggestion", new Class<?>[]{Long.class, Long.class}, 404L, 10L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("diagnosis suggestion not found");
+        DiagnosisSuggestionRecordEntity foreign = diagnosisSuggestion(405L, 200L, 99L);
+        when(diagnosisSuggestions.findById(405L)).thenReturn(Optional.of(foreign));
+        assertThatThrownBy(() -> invokePrivate("requireDoctorDiagnosisSuggestion", new Class<?>[]{Long.class, Long.class}, 405L, 10L))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("diagnosis suggestion permission required");
+    }
+
     private ActorContext patientActor() {
         return new ActorContext(1L, ActorRole.PATIENT, 100L, null, "patient", "王一");
     }
@@ -712,6 +1016,24 @@ class WorkflowServiceTest {
 
     private AIModels.AIExecutionOutcome<String> outcome(String taskType, String text) {
         return new AIModels.AIExecutionOutcome<>(text, AIModels.AIInvocationMeta.local(taskType, "v1", text, false, null));
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T invokePrivate(String methodName, Class<?>[] parameterTypes, Object... args) throws Exception {
+        Method method = WorkflowService.class.getDeclaredMethod(methodName, parameterTypes);
+        method.setAccessible(true);
+        try {
+            return (T) method.invoke(service, args);
+        } catch (InvocationTargetException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof Exception checked) {
+                throw checked;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new RuntimeException(cause);
+        }
     }
 
     private DepartmentEntity department(Long id, String code, String name, String status) {

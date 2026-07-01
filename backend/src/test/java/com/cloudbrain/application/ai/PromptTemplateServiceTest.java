@@ -73,6 +73,30 @@ class PromptTemplateServiceTest {
         assertThat(rendered.body()).isNotBlank();
     }
 
+    @Test
+    void resolveFallsBackToAnyActiveTemplateWhenNoDefaultExists() {
+        PromptTemplateEntity anyActive = template("chat-any", "CHAT", "general",
+                "input={{inputText}}; blocked={{secret}}", "inputText; ignored", 4);
+        when(repository.findFirstByTaskTypeAndDeptCodeIsNullAndDefaultTemplateTrueAndStatusOrderByVersionDesc(
+                "CHAT", "ACTIVE")).thenReturn(Optional.empty());
+        when(repository.findByTaskTypeAndStatusOrderByVersionDesc("CHAT", "ACTIVE")).thenReturn(List.of(anyActive));
+
+        var resolved = service.resolve("chat", null, Map.of("inputText", "hello", "secret", "hidden"));
+
+        assertThat(resolved.templateCode()).isEqualTo("chat-any");
+        assertThat(resolved.body()).contains("input=hello", "blocked=");
+        assertThat(resolved.body()).doesNotContain("hidden");
+    }
+
+    @Test
+    void renderBuiltinCoversAllTaskTypesAndNullVariables() {
+        assertThat(service.renderBuiltin("triage", "cardiology", null)).contains("{{chiefComplaint}}");
+        assertThat(service.renderBuiltin("medical_record", null, Map.of("conversationText", "text"))).contains("chiefComplaint:");
+        assertThat(service.renderBuiltin("diagnosis", null, Map.of("conversationText", "text"))).contains("suggestedDiagnoses:");
+        assertThat(service.renderBuiltin("prescription_review", null, Map.of("riskLevel", "LOW"))).contains("llmSuggestion:");
+        assertThat(service.renderBuiltin("chat", null, Map.of("inputText", "hello"))).contains("{{inputText}}");
+    }
+
     private PromptTemplateEntity template(String code, String taskType, String deptCode, String body, String whitelist, int version) {
         PromptTemplateEntity entity = new PromptTemplateEntity();
         entity.setTemplateCode(code);

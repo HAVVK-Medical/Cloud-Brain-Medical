@@ -145,7 +145,7 @@ public class DatabaseSeeder implements CommandLineRunner {
             jdbcTemplate.execute("alter table " + tableName + " auto_increment = " + nextValue);
             return;
         }
-        if (normalized.contains("h2")) {
+        if (normalized.contains("h2") || normalized.contains("kingbase") || normalized.contains("postgresql")) {
             jdbcTemplate.execute("alter table " + tableName + " alter column id restart with " + nextValue);
         }
     }

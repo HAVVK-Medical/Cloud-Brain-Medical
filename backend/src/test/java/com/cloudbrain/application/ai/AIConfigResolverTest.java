@@ -7,6 +7,7 @@ import com.cloudbrain.application.admin.ConfigCipher;
 import com.cloudbrain.entity.core.AIConfigEntity;
 import com.cloudbrain.repository.AIConfigJpaRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,32 @@ class AIConfigResolverTest {
 
         when(repository.findAll()).thenReturn(List.of(config(2L, "triage", true, 1, "triage-key")));
         assertThat(resolver.resolve("medical_record")).isNull();
+    }
+
+    @Test
+    void resolveHandlesBlankTaskScopeAndNullProviderValues() {
+        AIConfigEntity fallback = config(1L, " DEFAULT ", false, 3, "fallback-key");
+        fallback.setProvider(null);
+        when(repository.findAll()).thenReturn(List.of(fallback));
+
+        var resolved = resolver.resolve(" ");
+
+        assertThat(resolved).isNotNull();
+        assertThat(resolved.id()).isEqualTo(1L);
+        assertThat(resolved.provider()).isEmpty();
+        assertThat(resolved.apiKey()).isEqualTo("fallback-key");
+    }
+
+    @Test
+    void resolveIgnoresNullConfigEntriesAndBlankApiKeys() {
+        AIConfigEntity blankKey = config(1L, "CHAT", true, 10, "valid");
+        blankKey.setApiKeyEncrypted("\t");
+        List<AIConfigEntity> configs = new ArrayList<>();
+        configs.add(null);
+        configs.add(blankKey);
+        when(repository.findAll()).thenReturn(configs);
+
+        assertThat(resolver.resolve("CHAT")).isNull();
     }
 
     private AIConfigEntity config(Long id, String taskScope, boolean defaultConfig, int priority, String apiKey) {
