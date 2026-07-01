@@ -101,6 +101,7 @@ const confirmOpen = ref(false);
 const confirmTitle = ref('');
 const confirmMessage = ref('');
 const confirmAction = ref<(() => void) | null>(null);
+const confirmLoading = ref(false);
 const dashboard = ref<DashboardOverview | null>(null);
 const dashboardTrends = ref<DashboardTrendPoint[]>([]);
 const aiUsage = ref<AiUsageStats | null>(null);
@@ -1063,9 +1064,6 @@ onBeforeUnmount(() => {
         </p>
 
       <div class="flex items-center gap-3 mb-6 flex-wrap">
-        <StatusChip :tone="notificationSocketState === 'connected' ? 'success' : 'neutral'" :dot="true">
-          通知 {{ notificationSocketState === 'connected' ? '已连接' : '未连接' }}
-        </StatusChip>
         <span class="flex-1" />
         <button class="btn-ghost" type="button" @click="loadAll" :disabled="loading">
           <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />

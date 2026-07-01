@@ -106,7 +106,6 @@ defineExpose({ steps, activeStepId, updateStepContent, setStepCompleted, setStep
       <div class="flex items-center justify-between px-4 py-3 border-b border-border bg-gray-50">
         <div class="flex items-center gap-2">
           <span class="text-base font-semibold">AI 工作台</span>
-          <span class="w-2 h-2 rounded-full bg-green-500" title="AI 已连接" />
         </div>
         <button class="p-1 hover:bg-gray-200 rounded cursor-pointer" @click="emit('close')">
           <X :size="18" />

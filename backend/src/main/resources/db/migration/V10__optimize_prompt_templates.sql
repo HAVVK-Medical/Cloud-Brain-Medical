@@ -173,10 +173,5 @@ WHERE NOT EXISTS (
 );
 
 -- ============================================================
--- AI Config for CHAT task type
+-- AI Config for CHAT task type — removed doubao; DeepSeek (V11) handles ALL scopes
 -- ============================================================
-INSERT INTO ai_config (provider, model_name, api_url, api_key_encrypted, key_version, task_scope, timeout_seconds, is_default, health_status, config_version, enabled, priority, status, created_at, updated_at)
-SELECT 'doubao', 'doubao-seed-1-6-251015', NULL, NULL, NULL, 'CHAT', 60, TRUE, 'UNKNOWN', '1.0.0', TRUE, 10, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-WHERE NOT EXISTS (
-    SELECT 1 FROM ai_config WHERE task_scope = 'CHAT' AND is_default = TRUE AND status = 'ACTIVE'
-);

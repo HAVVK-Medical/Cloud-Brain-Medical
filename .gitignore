@@ -20,6 +20,7 @@
 /.local-mysql/*.err
 /.local-mysql/*.log
 /.local-mysql/*.pid
+/.local-mysql/my-project.ini
 
 /.DS_Store
 /Thumbs.db

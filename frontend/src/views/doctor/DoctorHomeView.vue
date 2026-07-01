@@ -1102,9 +1102,6 @@ onBeforeUnmount(() => {
         <StatusChip :tone="consultationStatusTone">
           {{ selectedRegistration?.patientName || '未选中患者' }} · {{ consultationStatusLabel }}
         </StatusChip>
-        <StatusChip :tone="notificationSocketState === 'connected' ? 'success' : 'neutral'" :dot="true">
-          通知 {{ notificationSocketState === 'connected' ? '已连接' : '未连接' }}
-        </StatusChip>
         <span class="flex-1" />
         <button class="btn-ghost" type="button" @click="refreshAll()" :disabled="loading">
           <RefreshCw :size="16" :class="{ 'animate-spin': loading }" />

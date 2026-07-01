@@ -1,19 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import { Stethoscope, ShieldCheck, UserRound } from 'lucide-vue-next';
 import { RouterLink } from 'vue-router';
-
-import { useAppStore } from '@/stores/app';
-import { getServiceLabel } from '@/utils/zh';
-import StatusChip from '@/components/shared/StatusChip.vue';
-
-const appStore = useAppStore();
-
-const healthText = computed(() => {
-  if (appStore.loading) return '检查中';
-  if (appStore.degraded) return '异常';
-  return getServiceLabel(appStore.health?.service ?? '后端待启动');
-});
 </script>
 
 <template>
@@ -49,10 +36,5 @@ const healthText = computed(() => {
       </RouterLink>
     </div>
 
-    <div class="mt-10 text-center">
-      <StatusChip :tone="appStore.health?.status === 'UP' ? 'success' : 'danger'">
-        {{ healthText }}
-      </StatusChip>
-    </div>
   </div>
 </template>

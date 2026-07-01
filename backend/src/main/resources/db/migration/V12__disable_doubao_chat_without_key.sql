@@ -1,12 +1,6 @@
 -- V12__disable_doubao_chat_without_key.sql
--- Disable the Doubao CHAT config that has no API key, so DeepSeek ALL config
--- can be selected as fallback. The AIConfigResolver code also filters out
--- configs without API keys at the application level — this migration provides
--- belt-and-suspenders safety at the data level.
-
-UPDATE ai_config
-SET enabled = FALSE
+-- Doubao CHAT config has been removed from V10 seed data (DeepSeek handles ALL scopes via V11).
+-- This migration cleans up any existing doubao rows from earlier deployments.
+DELETE FROM ai_config
 WHERE provider = 'doubao'
-  AND task_scope = 'CHAT'
-  AND api_key_encrypted IS NULL
-  AND enabled = TRUE;
+  AND task_scope = 'CHAT';
