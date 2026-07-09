@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "HAVVK Medical HarmonyOS entry module.",
+  "main": "",
+  "author": "HAVVK Medical",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

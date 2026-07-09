@@ -1,0 +1,9 @@
+/.hvigor/
+/build/
+/entry/build/
+/.idea/
+/.deveco/
+/.preview/
+*.hap
+*.hsp
+*.har

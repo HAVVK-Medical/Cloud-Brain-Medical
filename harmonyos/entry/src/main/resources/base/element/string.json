@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "患者端登录与挂号"
+    },
+    {
+      "name": "entryability_label",
+      "value": "HAVVK智慧诊疗"
+    },
+    {
+      "name": "entryability_desc",
+      "value": "HAVVK智慧诊疗入口"
+    },
+    {
+      "name": "internet_permission_reason",
+      "value": "用于连接智慧诊疗后端服务"
+    }
+  ]
+}
